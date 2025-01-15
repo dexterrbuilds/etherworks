@@ -1,74 +1,152 @@
-import { Image, StyleSheet, Platform } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { NavigationContainer, NavigationIndependentTree } from '@react-navigation/native';
+import { createStackNavigator } from '@react-navigation/stack';
+import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { AuthProvider, useAuth } from '../AuthContext';
+import LoginScreen from '../screens/LoginScreen';
+import RegisterScreen from '../screens/RegisterScreen';
+import OnboardingScreen from '../screens/OnboardingScreen';
+import HomeScreen from '../screens/HomeScreen';
+import GigDetailsScreen from '../screens/GigDetailsScreen';
+import ProfileScreen from '../screens/ProfileScreen';
+import AdminDashboard from '../screens/AdminDashboard';
+import { Ionicons } from '@expo/vector-icons';
+import { TouchableOpacity, Image, ActivityIndicator, View } from 'react-native';
+import { loadFonts } from '../utils/loadFonts';
 
-import { HelloWave } from '@/components/HelloWave';
-import ParallaxScrollView from '@/components/ParallaxScrollView';
-import { ThemedText } from '@/components/ThemedText';
-import { ThemedView } from '@/components/ThemedView';
+const Stack = createStackNavigator();
+const Tab = createBottomTabNavigator();
 
-export default function HomeScreen() {
+const MainStack = createStackNavigator();
+
+const MainStackNavigator = () => {
+  const { profile } = useAuth();
+
+  const HeaderRight = ({ navigation }: any) => (
+    <TouchableOpacity onPress={() => navigation.navigate('Profile')}>
+      <Image
+        source={{ uri: profile?.avatarUrl || 'https://ui-avatars.com/api/?name=User' }}
+        style={{ width: 30, height: 30, borderRadius: 15, marginRight: 10,   alignSelf: 'center' }}
+      />
+    </TouchableOpacity>
+  );
+
+  const HeaderLeft = () => (
+    <TouchableOpacity onPress={() => {/* Open menu */}}>
+      <Ionicons name="menu" size={24} color="black" style={{ marginLeft: 10 }} />
+    </TouchableOpacity>
+  );
+
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12'
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-        <ThemedText>
-          Tap the Explore tab to learn more about what's included in this starter app.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          When you're ready, run{' '}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+    <MainStack.Navigator>
+      <MainStack.Screen 
+        name="MainTabs" 
+        component={MainTabs}
+        options={({ navigation }) => ({
+          headerLeft: () => <HeaderLeft />,
+          headerRight: () => <HeaderRight navigation={navigation} />,
+          headerTitle: 'Sei earn',
+        })}
+      />
+      <MainStack.Screen name="GigDetails" component={GigDetailsScreen} />
+      <MainStack.Screen name="Profile" component={ProfileScreen} />
+    </MainStack.Navigator>
+  );
+};
+
+const MainTabs = () => (
+  <Tab.Navigator
+    screenOptions={({ route }) => ({
+      tabBarIcon: ({ focused, color, size }) => {
+        let iconName: keyof typeof Ionicons.glyphMap | undefined;
+
+        if (route.name === 'Home') {
+          iconName = focused ? 'home' : 'home-outline';
+        } else if (route.name === 'Profile') {
+          iconName = focused ? 'person' : 'person-outline';
+        }
+
+        return <Ionicons name={iconName} size={size} color={color} />;
+      },
+    })}
+  >
+    <Tab.Screen name="Home" component={HomeScreen} options={{ headerShown: false }} />
+    <Tab.Screen name="Profile" component={ProfileScreen} options={{ headerShown: false }} />
+  </Tab.Navigator>
+);
+
+type RootStackParamList = {
+  Login: undefined;
+  Register: undefined;
+  Onboarding: undefined;
+  Main: undefined;
+  GigDetails: { gigId: string };
+  AdminDashboard: undefined;
+  Profile: undefined;
+};
+
+const AppNavigator = () => {
+  const { user, profile } = useAuth();
+
+  return (
+    <NavigationIndependentTree>
+    <NavigationContainer>
+      <Stack.Navigator>
+        {user ? (
+          profile && profile.onboardingCompleted ? (
+            <>
+              <Stack.Screen 
+                name="Main" 
+                component={MainStackNavigator}
+                options={{ headerShown: false }}
+              />
+              {profile.isAdmin && (
+                <Stack.Screen name="AdminDashboard" component={AdminDashboard} />
+              )}
+            </>
+          ) : (
+            <Stack.Screen name="Onboarding" component={OnboardingScreen} options={{ headerShown: false }} />
+          )
+        ) : (
+          <>
+            <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="Register" component={RegisterScreen} />
+          </>
+        )}
+      </Stack.Navigator>
+    </NavigationContainer>
+    </NavigationIndependentTree>
+  );
+};
+
+export default function App() {
+
+  const [fontsLoaded, setFontsLoaded] = useState(false);
+
+  useEffect(() => {
+    async function prepare() {
+      try {
+        await loadFonts();
+        setFontsLoaded(true);
+      } catch (e) {
+        console.warn(e);
+      }
+    }
+    prepare();
+  }, []);
+
+  if (!fontsLoaded) {
+    return (
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+        <ActivityIndicator size="large" color="#780000" />
+      </View>
+    );
+  }
+
+  return (
+    <AuthProvider>
+      <AppNavigator />
+    </AuthProvider>
   );
 }
 
-const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
-  },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
-  },
-});
