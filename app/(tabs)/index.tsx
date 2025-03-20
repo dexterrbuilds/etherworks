@@ -54,26 +54,32 @@ const MainStackNavigator = () => {
   );
 };
 
-const MainTabs = () => (
-  <Tab.Navigator
-    screenOptions={({ route }) => ({
-      tabBarIcon: ({ focused, color, size }) => {
-        let iconName: keyof typeof Ionicons.glyphMap | undefined;
-
-        if (route.name === 'Home') {
-          iconName = focused ? 'home' : 'home-outline';
-        } else if (route.name === 'Profile') {
-          iconName = focused ? 'person' : 'person-outline';
-        }
-
-        return <Ionicons name={iconName} size={size} color={color} />;
-      },
-    })}
-  >
-    <Tab.Screen name="Home" component={HomeScreen} options={{ headerShown: false }} />
-    <Tab.Screen name="Profile" component={ProfileScreen} options={{ headerShown: false }} />
-  </Tab.Navigator>
-);
+const MainTabs = () => {
+  const { profile } = useAuth();
+  return (
+    <Tab.Navigator
+      screenOptions={({ route }) => ({
+        tabBarIcon: ({ focused, color, size }) => {
+          let iconName;
+          if (route.name === 'Home') {
+            iconName = focused ? 'home' : 'home-outline';
+          } else if (route.name === 'Profile') {
+            iconName = focused ? 'person' : 'person-outline';
+          } else if (route.name === 'Admin') {
+            iconName = focused ? 'settings' : 'settings-outline';
+          }
+          return <Ionicons name={iconName} size={size} color={color} />;
+        },
+      })}
+    >
+      <Tab.Screen name="Home" component={HomeScreen} options={{ headerShown: false }} />
+      <Tab.Screen name="Profile" component={ProfileScreen} options={{ headerShown: false }} />
+      {profile.isAdmin && (
+        <Tab.Screen name="Admin" component={AdminDashboard} options={{ headerShown: false }} />
+      )}
+    </Tab.Navigator>
+  );
+};
 
 type RootStackParamList = {
   Login: undefined;
