@@ -312,7 +312,7 @@ export default function OnboardingScreen({ navigation }: any) {
                     activeOpacity={0.7}
                   >
                     <Ionicons
-                      name={interest.icon}
+                      name={interest.icon as keyof typeof Ionicons.glyphMap}
                       size={24}
                       color={selectedInterests.includes(interest.name) ? '#FFFFFF' : '#666666'}
                     />
