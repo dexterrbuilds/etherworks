@@ -11,13 +11,32 @@ import {
   KeyboardAvoidingView,
   Platform,
   Modal,
-  Image
+  Image,
+  Animated
 } from 'react-native';
-import { db, storage } from '../../firebaseConfig';
+import { db } from '../../firebaseConfig';
 import { collection, addDoc, getDocs, deleteDoc, doc, updateDoc, query, orderBy, where } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import { LinearGradient } from 'expo-linear-gradient';
+
+// Web3 theme colors
+const COLORS = {
+  background: '#2E1A47',
+  primary: '#8A2BE2',
+  secondary: '#87CEEB',
+  primaryLight: '#9D4EDD',
+  accent: '#6F42C1',
+  text: '#FFFFFF',
+  textSecondary: '#B0C4DE',
+  cardBackground: '#3C2157',
+  inputBackground: '#251539',
+  border: '#4A2963',
+  error: '#FF5252',
+  success: '#4CAF50',
+  warning: '#FFC107',
+  overlay: 'rgba(20, 10, 30, 0.85)'
+};
 
 const CATEGORIES = [
   'Design', 'Development', 'Writing', 'Marketing', 
@@ -35,9 +54,8 @@ export default function AdminDashboard() {
   const [skills, setSkills] = useState('');
   const [location, setLocation] = useState('Remote');
   const [image, setImage] = useState(null);
-  const [imageUrl, setImageUrl] = useState('');
-  const [uploadingImage, setUploadingImage] = useState(false);
-  
+  const [imageBase64, setImageBase64] = useState('');
+  const [processingImage, setProcessingImage] = useState(false);
   
   const [isLoading, setIsLoading] = useState(false);
   const [existingGigs, setExistingGigs] = useState([]);
@@ -48,6 +66,18 @@ export default function AdminDashboard() {
   const [isFormVisible, setIsFormVisible] = useState(false);
   const [imagePreviewVisible, setImagePreviewVisible] = useState(false);
   const [previewImageUrl, setPreviewImageUrl] = useState('');
+  
+  // Animation values
+  const [fadeAnim] = useState(new Animated.Value(0));
+  
+  // Fade in animation
+  useEffect(() => {
+    Animated.timing(fadeAnim, {
+      toValue: 1,
+      duration: 500,
+      useNativeDriver: true,
+    }).start();
+  }, []);
   
   // Fetch existing gigs
   useEffect(() => {
@@ -93,55 +123,17 @@ export default function AdminDashboard() {
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: [16, 9],
-        quality: 0.8,
+        quality: 0.5, // Reduced quality for smaller file size
+        base64: true, // Request base64 data
       });
       
       if (!result.canceled && result.assets[0]) {
+        // Store the image object and its base64 data
         setImage(result.assets[0]);
+        setImageBase64(`data:image/jpeg;base64,${result.assets[0].base64}`);
       }
     } catch (error) {
       Alert.alert('Error', 'Failed to select image: ' + error.message);
-    }
-  };
-
-  const uploadImage = async () => {
-    if (!image) return null;
-    
-    setUploadingImage(true);
-    try {
-      // Convert URI to blob
-      const response = await fetch(image.uri);
-      const blob = await response.blob();
-      
-      // Generate a unique filename
-      const filename = `gig_images/${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
-      const storageRef = ref(storage, filename);
-      
-      // Upload to Firebase Storage
-      await uploadBytes(storageRef, blob);
-      
-      // Get download URL
-      const downloadUrl = await getDownloadURL(storageRef);
-      setImageUrl(downloadUrl);
-      
-      return { url: downloadUrl, path: filename };
-    } catch (error) {
-      Alert.alert('Upload Error', 'Failed to upload image: ' + error.message);
-      return null;
-    } finally {
-      setUploadingImage(false);
-    }
-  };
-
-  const deleteImage = async (imagePath) => {
-    if (!imagePath) return;
-    
-    try {
-      const storageRef = ref(storage, imagePath);
-      await deleteObject(storageRef);
-    } catch (error) {
-      console.log('Error deleting image:', error);
-      // Continue without throwing an error as this is not critical
     }
   };
 
@@ -165,7 +157,7 @@ export default function AdminDashboard() {
     setSkills('');
     setLocation('Remote');
     setImage(null);
-    setImageUrl('');
+    setImageBase64('');
     setEditingGig(null);
   };
 
@@ -180,16 +172,6 @@ export default function AdminDashboard() {
     try {
       const skillsArray = skills.split(',').map(skill => skill.trim()).filter(Boolean);
       
-      // Upload image if selected
-      let imageData = null;
-      if (image) {
-        imageData = await uploadImage();
-        if (!imageData) {
-          setIsLoading(false);
-          return;
-        }
-      }
-      
       await addDoc(collection(db, 'gigs'), {
         title,
         projectName,
@@ -199,8 +181,7 @@ export default function AdminDashboard() {
         duration,
         skills: skillsArray,
         location,
-        imageUrl: imageData ? imageData.url : '',
-        imagePath: imageData ? imageData.path : '',
+        imageBase64: imageBase64 || '', // Store the base64 string directly
         createdAt: new Date().toISOString(),
         status: 'Open'
       });
@@ -229,22 +210,6 @@ export default function AdminDashboard() {
     try {
       const skillsArray = skills.split(',').map(skill => skill.trim()).filter(Boolean);
       
-      // Handle image update
-      let imageData = null;
-      if (image) {
-        // Upload new image
-        imageData = await uploadImage();
-        if (!imageData && image) {
-          setIsLoading(false);
-          return;
-        }
-        
-        // Delete old image if exists and a new one was uploaded
-        if (imageData && editingGig.imagePath) {
-          await deleteImage(editingGig.imagePath);
-        }
-      }
-      
       const updateData = {
         title,
         projectName,
@@ -257,10 +222,9 @@ export default function AdminDashboard() {
         updatedAt: new Date().toISOString()
       };
       
-      // Only update image fields if a new image was uploaded
-      if (imageData) {
-        updateData.imageUrl = imageData.url;
-        updateData.imagePath = imageData.path;
+      // Only update the image if a new one was selected
+      if (image && imageBase64) {
+        updateData.imageBase64 = imageBase64;
       }
       
       await updateDoc(doc(db, 'gigs', editingGig.id), updateData);
@@ -277,8 +241,6 @@ export default function AdminDashboard() {
   };
 
   const deleteGig = async (gigId) => {
-    const gigToDelete = existingGigs.find(g => g.id === gigId);
-    
     Alert.alert(
       'Confirm Deletion',
       'Are you sure you want to delete this gig?',
@@ -292,11 +254,6 @@ export default function AdminDashboard() {
             try {
               // Delete the document
               await deleteDoc(doc(db, 'gigs', gigId));
-              
-              // Delete the image if exists
-              if (gigToDelete && gigToDelete.imagePath) {
-                await deleteImage(gigToDelete.imagePath);
-              }
               
               Alert.alert('Success', 'Gig deleted successfully!');
               fetchGigs();
@@ -321,8 +278,17 @@ export default function AdminDashboard() {
     setDuration(gig.duration || '');
     setSkills(gig.skills ? gig.skills.join(', ') : '');
     setLocation(gig.location || 'Remote');
-    setImageUrl(gig.imageUrl || '');
-    setImage(null); // Reset image selection
+    
+    // Handle image data
+    if (gig.imageBase64) {
+      setImageBase64(gig.imageBase64);
+      // Create a dummy image object to show preview
+      setImage({ uri: gig.imageBase64 });
+    } else {
+      setImage(null);
+      setImageBase64('');
+    }
+    
     setIsFormVisible(true);
   };
 
@@ -335,8 +301,17 @@ export default function AdminDashboard() {
     setDuration(gig.duration || '');
     setSkills(gig.skills ? gig.skills.join(', ') : '');
     setLocation(gig.location || 'Remote');
-    setImageUrl(gig.imageUrl || '');
-    setImage(null); // Reset image selection
+    
+    // Handle image data
+    if (gig.imageBase64) {
+      setImageBase64(gig.imageBase64);
+      // Create a dummy image object to show preview
+      setImage({ uri: gig.imageBase64 });
+    } else {
+      setImage(null);
+      setImageBase64('');
+    }
+    
     setEditingGig(null);
     setIsFormVisible(true);
   };
@@ -357,255 +332,308 @@ export default function AdminDashboard() {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       style={styles.container}
     >
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Gig Management</Text>
-        {!isFormVisible && (
-          <TouchableOpacity 
-            style={styles.addButton} 
-            onPress={() => {
-              resetForm();
-              setIsFormVisible(true);
-            }}
-          >
-            <Ionicons name="add-circle" size={24} color="#fff" />
-            <Text style={styles.buttonText}>New Gig</Text>
-          </TouchableOpacity>
-        )}
-      </View>
+      <LinearGradient
+        colors={[COLORS.background, '#261338']}
+        style={styles.headerGradient}
+      >
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Gig Management</Text>
+          {!isFormVisible && (
+            <TouchableOpacity 
+              style={styles.addButton} 
+              onPress={() => {
+                resetForm();
+                setIsFormVisible(true);
+              }}
+            >
+              <Ionicons name="add-circle" size={24} color={COLORS.text} />
+              <Text style={styles.buttonText}>New Gig</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </LinearGradient>
 
       {!isFormVisible ? (
-        <View style={styles.listContainer}>
+        <Animated.View 
+          style={[styles.listContainer, { opacity: fadeAnim }]}
+        >
           <View style={styles.filterContainer}>
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search gigs..."
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-            />
+            <View style={styles.searchInputContainer}>
+              <Ionicons name="search" size={20} color={COLORS.textSecondary} style={styles.searchIcon} />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search gigs..."
+                placeholderTextColor={COLORS.textSecondary}
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+              />
+            </View>
             <TouchableOpacity 
               style={styles.filterButton}
               onPress={() => setShowCategoryModal(true)}
             >
               <Text style={styles.filterButtonText}>
-                {filterCategory === 'All' ? 'All Categories' : filterCategory} ▼
+                {filterCategory === 'All' ? 'All Categories' : filterCategory} 
               </Text>
+              <Ionicons name="chevron-down" size={16} color={COLORS.textSecondary} />
             </TouchableOpacity>
           </View>
 
           {isLoading ? (
-            <ActivityIndicator size="large" color="#007BFF" style={styles.loader} />
+            <ActivityIndicator size="large" color={COLORS.secondary} style={styles.loader} />
           ) : filteredGigs.length === 0 ? (
             <View style={styles.emptyState}>
-              <Ionicons name="document-outline" size={48} color="#ccc" />
+              <Ionicons name="document-outline" size={48} color={COLORS.textSecondary} />
               <Text style={styles.emptyStateText}>No gigs found</Text>
             </View>
           ) : (
             <ScrollView style={styles.gigList}>
-              {filteredGigs.map((gig) => (
-                <View key={gig.id} style={styles.gigCard}>
-                  {gig.imageUrl ? (
-                    <TouchableOpacity onPress={() => showImagePreview(gig.imageUrl)}>
-                      <Image 
-                        source={{ uri: gig.imageUrl }} 
-                        style={styles.gigImage} 
-                        resizeMode="cover"
-                      />
-                    </TouchableOpacity>
-                  ) : null}
-                  
-                  <View style={styles.gigHeader}>
-                    <View style={styles.titleContainer}>
-                      <Text style={styles.gigTitle}>{gig.title}</Text>
-                      {gig.projectName && (
-                        <Text style={styles.projectName}>Project: {gig.projectName}</Text>
-                      )}
-                    </View>
-                    <View style={styles.categoryBadge}>
-                      <Text style={styles.categoryText}>{gig.category}</Text>
-                    </View>
-                  </View>
-                  
-                  <Text style={styles.gigDescription} numberOfLines={2}>
-                    {gig.description}
-                  </Text>
-                  
-                  <View style={styles.gigMetadata}>
-                    <View style={styles.metadataItem}>
-                      <Ionicons name="cash-outline" size={16} color="#555" />
-                      <Text style={styles.metadataText}>${gig.payout}</Text>
-                    </View>
-                    
-                    {gig.duration && (
-                      <View style={styles.metadataItem}>
-                        <Ionicons name="time-outline" size={16} color="#555" />
-                        <Text style={styles.metadataText}>{gig.duration}</Text>
-                      </View>
+              {filteredGigs.map((gig) => {
+                if (!gig) return null; // Skip undefined gigs
+
+                return (
+                  <View key={gig.id} style={styles.gigCard}>
+                    {gig.imageBase64 ? (
+                      <TouchableOpacity onPress={() => showImagePreview(gig.imageBase64)}>
+                        <Image 
+                          source={{ uri: gig.imageBase64 }} 
+                          style={styles.gigImage} 
+                          resizeMode="cover"
+                        />
+                        <LinearGradient
+                          colors={['transparent', 'rgba(46, 26, 71, 0.8)']}
+                          style={styles.imageGradient}
+                        />
+                      </TouchableOpacity>
+                    ) : (
+                      <LinearGradient
+                        colors={[COLORS.primary, COLORS.background]}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={styles.noImageGradient}
+                      >
+                        <Ionicons name="image-outline" size={40} color="rgba(255,255,255,0.2)" />
+                      </LinearGradient>
                     )}
                     
-                    <View style={styles.metadataItem}>
-                      <Ionicons name="location-outline" size={16} color="#555" />
-                      <Text style={styles.metadataText}>{gig.location || 'Remote'}</Text>
+                    <View style={styles.gigHeader}>
+                      <View style={styles.titleContainer}>
+                        <Text style={styles.gigTitle}>{gig.title || 'Untitled'}</Text>
+                        {gig.projectName && (
+                          <Text style={styles.projectName}>Project: {gig.projectName}</Text>
+                        )}
+                      </View>
+                      <View style={styles.categoryBadge}>
+                        <Text style={styles.categoryText}>{gig.category || 'Uncategorized'}</Text>
+                      </View>
+                    </View>
+                    
+                    <Text style={styles.gigDescription} numberOfLines={2}>
+                      {gig.description || 'No description available'}
+                    </Text>
+                    
+                    <View style={styles.gigMetadata}>
+                      <View style={styles.metadataItem}>
+                        <Ionicons name="cash-outline" size={16} color={COLORS.secondary} />
+                        <Text style={styles.metadataText}>${gig.payout || '0'}</Text>
+                      </View>
+                      
+                      {gig.duration && (
+                        <View style={styles.metadataItem}>
+                          <Ionicons name="time-outline" size={16} color={COLORS.secondary} />
+                          <Text style={styles.metadataText}>{gig.duration}</Text>
+                        </View>
+                      )}
+                      
+                      <View style={styles.metadataItem}>
+                        <Ionicons name="location-outline" size={16} color={COLORS.secondary} />
+                        <Text style={styles.metadataText}>{gig.location || 'Remote'}</Text>
+                      </View>
+                    </View>
+                    
+                    <View style={styles.skillsContainer}>
+                      {gig.skills && gig.skills.map((skill, index) => (
+                        <View key={index} style={styles.skillBadge}>
+                          <Text style={styles.skillText}>{skill}</Text>
+                        </View>
+                      ))}
+                    </View>
+                    
+                    <View style={styles.actionButtons}>
+                      <TouchableOpacity 
+                        style={[styles.actionButton, styles.editButton]} 
+                        onPress={() => editGig(gig)}
+                      >
+                        <Ionicons name="create-outline" size={16} color={COLORS.text} />
+                        <Text style={styles.actionButtonText}>Edit</Text>
+                      </TouchableOpacity>
+                      
+                      <TouchableOpacity 
+                        style={[styles.actionButton, styles.duplicateButton]} 
+                        onPress={() => duplicateGig(gig)}
+                      >
+                        <Ionicons name="copy-outline" size={16} color={COLORS.text} />
+                        <Text style={styles.actionButtonText}>Duplicate</Text>
+                      </TouchableOpacity>
+                      
+                      <TouchableOpacity 
+                        style={[styles.actionButton, styles.deleteButton]} 
+                        onPress={() => deleteGig(gig.id)}
+                      >
+                        <Ionicons name="trash-outline" size={16} color={COLORS.text} />
+                        <Text style={styles.actionButtonText}>Delete</Text>
+                      </TouchableOpacity>
                     </View>
                   </View>
-                  
-                  <View style={styles.actionButtons}>
-                    <TouchableOpacity 
-                      style={[styles.actionButton, styles.editButton]} 
-                      onPress={() => editGig(gig)}
-                    >
-                      <Ionicons name="create-outline" size={16} color="#fff" />
-                      <Text style={styles.actionButtonText}>Edit</Text>
-                    </TouchableOpacity>
-                    
-                    <TouchableOpacity 
-                      style={[styles.actionButton, styles.duplicateButton]} 
-                      onPress={() => duplicateGig(gig)}
-                    >
-                      <Ionicons name="copy-outline" size={16} color="#fff" />
-                      <Text style={styles.actionButtonText}>Duplicate</Text>
-                    </TouchableOpacity>
-                    
-                    <TouchableOpacity 
-                      style={[styles.actionButton, styles.deleteButton]} 
-                      onPress={() => deleteGig(gig.id)}
-                    >
-                      <Ionicons name="trash-outline" size={16} color="#fff" />
-                      <Text style={styles.actionButtonText}>Delete</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              ))}
+                );
+              })}
             </ScrollView>
           )}
-        </View>
+        </Animated.View>
       ) : (
         <ScrollView style={styles.formContainer}>
-          <Text style={styles.formTitle}>
-            {editingGig ? 'Edit Gig' : 'Create New Gig'}
-          </Text>
-          
-          <Text style={styles.inputLabel}>Title</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Gig title"
-            value={title}
-            onChangeText={setTitle}
-            maxLength={100}
-          />
-          
-          <Text style={styles.inputLabel}>Project Name</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Project name"
-            value={projectName}
-            onChangeText={setProjectName}
-            maxLength={100}
-          />
-          
-          <Text style={styles.inputLabel}>Category</Text>
-          <TouchableOpacity 
-            style={styles.pickerButton}
-            onPress={() => setShowCategoryModal(true)}
+          <LinearGradient 
+            colors={[COLORS.cardBackground, COLORS.background]} 
+            style={styles.formCard}
           >
-            <Text style={category ? styles.pickerText : styles.pickerPlaceholder}>
-              {category || 'Select a category'}
+            <Text style={styles.formTitle}>
+              {editingGig ? 'Edit Gig' : 'Create New Gig'}
             </Text>
-            <Ionicons name="chevron-down" size={20} color="#555" />
-          </TouchableOpacity>
-          
-          <Text style={styles.inputLabel}>Project Image</Text>
-          <View style={styles.imageUploadContainer}>
-            {(imageUrl || (image && image.uri)) ? (
-              <View style={styles.imagePreviewContainer}>
-                <Image 
-                  source={{ uri: image ? image.uri : imageUrl }} 
-                  style={styles.imagePreview} 
-                  resizeMode="cover"
-                />
-                <TouchableOpacity 
-                  style={styles.removeImageButton}
-                  onPress={() => {
-                    setImage(null);
-                    if (editingGig && !image) {
-                      setImageUrl('');
-                    }
-                  }}
-                >
-                  <Ionicons name="close-circle" size={24} color="#e74c3c" />
-                </TouchableOpacity>
-              </View>
-            ) : (
-              <TouchableOpacity 
-                style={styles.imageUploadButton} 
-                onPress={selectImage}
-              >
-                <Ionicons name="image-outline" size={24} color="#3498db" />
-                <Text style={styles.imageUploadText}>Select Image</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-          
-          <Text style={styles.inputLabel}>Description</Text>
-          <TextInput
-            style={styles.textArea}
-            placeholder="Detailed description of the gig"
-            value={description}
-            onChangeText={setDescription}
-            multiline
-            numberOfLines={5}
-            textAlignVertical="top"
-          />
-          
-          <Text style={styles.inputLabel}>Payout ($)</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Payout amount"
-            value={payout}
-            onChangeText={setPayout}
-            keyboardType="numeric"
-          />
-          
-          <Text style={styles.inputLabel}>Estimated Duration</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="e.g., 2-3 days, 1 week"
-            value={duration}
-            onChangeText={setDuration}
-          />
-          
-          <Text style={styles.inputLabel}>Required Skills (comma separated)</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="e.g., JavaScript, Design, Writing"
-            value={skills}
-            onChangeText={setSkills}
-          />
-          
-          <View style={styles.formButtons}>
+            
+            <Text style={styles.inputLabel}>Title</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Gig title"
+              placeholderTextColor="rgba(176, 196, 222, 0.5)"
+              value={title}
+              onChangeText={setTitle}
+              maxLength={100}
+            />
+            
+            <Text style={styles.inputLabel}>Project Name</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Project name"
+              placeholderTextColor="rgba(176, 196, 222, 0.5)"
+              value={projectName}
+              onChangeText={setProjectName}
+              maxLength={100}
+            />
+            
+            <Text style={styles.inputLabel}>Category</Text>
             <TouchableOpacity 
-              style={styles.cancelButton} 
-              onPress={() => {
-                resetForm();
-                setIsFormVisible(false);
-              }}
+              style={styles.pickerButton}
+              onPress={() => setShowCategoryModal(true)}
             >
-              <Text style={styles.cancelButtonText}>Cancel</Text>
+              <Text style={category ? styles.pickerText : styles.pickerPlaceholder}>
+                {category || 'Select a category'}
+              </Text>
+              <Ionicons name="chevron-down" size={20} color={COLORS.textSecondary} />
             </TouchableOpacity>
             
-            <TouchableOpacity 
-              style={styles.submitButton} 
-              onPress={editingGig ? updateGig : createGig}
-              disabled={isLoading || uploadingImage}
-            >
-              {isLoading || uploadingImage ? (
-                <ActivityIndicator size="small" color="#fff" />
+            <Text style={styles.inputLabel}>Project Image</Text>
+            <View style={styles.imageUploadContainer}>
+              {(imageBase64 || (image && image.uri)) ? (
+                <View style={styles.imagePreviewContainer}>
+                  <Image 
+                    source={{ uri: image ? image.uri : imageBase64 }} 
+                    style={styles.imagePreview} 
+                    resizeMode="cover"
+                  />
+                  <TouchableOpacity 
+                    style={styles.removeImageButton}
+                    onPress={() => {
+                      setImage(null);
+                      setImageBase64('');
+                    }}
+                  >
+                    <Ionicons name="close-circle" size={24} color={COLORS.error} />
+                  </TouchableOpacity>
+                </View>
               ) : (
-                <Text style={styles.submitButtonText}>
-                  {editingGig ? 'Update Gig' : 'Create Gig'}
-                </Text>
+                <TouchableOpacity 
+                  style={styles.imageUploadButton} 
+                  onPress={selectImage}
+                  disabled={processingImage}
+                >
+                  {processingImage ? (
+                    <ActivityIndicator size="small" color={COLORS.primary} />
+                  ) : (
+                    <>
+                      <Ionicons name="image-outline" size={24} color={COLORS.primary} />
+                      <Text style={styles.imageUploadText}>Select Image</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
               )}
-            </TouchableOpacity>
-          </View>
+            </View>
+            
+            <Text style={styles.inputLabel}>Description</Text>
+            <TextInput
+              style={styles.textArea}
+              placeholder="Detailed description of the gig"
+              placeholderTextColor="rgba(176, 196, 222, 0.5)"
+              value={description}
+              onChangeText={setDescription}
+              multiline
+              numberOfLines={5}
+              textAlignVertical="top"
+            />
+            
+            <Text style={styles.inputLabel}>Payout ($)</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Payout amount"
+              placeholderTextColor="rgba(176, 196, 222, 0.5)"
+              value={payout}
+              onChangeText={setPayout}
+              keyboardType="numeric"
+            />
+            
+            <Text style={styles.inputLabel}>Estimated Duration</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="e.g., 2-3 days, 1 week"
+              placeholderTextColor="rgba(176, 196, 222, 0.5)"
+              value={duration}
+              onChangeText={setDuration}
+            />
+            
+            <Text style={styles.inputLabel}>Required Skills (comma separated)</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="e.g., JavaScript, Design, Writing"
+              placeholderTextColor="rgba(176, 196, 222, 0.5)"
+              value={skills}
+              onChangeText={setSkills}
+            />
+            
+            <View style={styles.formButtons}>
+              <TouchableOpacity 
+                style={styles.cancelButton} 
+                onPress={() => {
+                  resetForm();
+                  setIsFormVisible(false);
+                }}
+              >
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={styles.submitButton} 
+                onPress={editingGig ? updateGig : createGig}
+                disabled={isLoading || processingImage}
+              >
+                {isLoading || processingImage ? (
+                  <ActivityIndicator size="small" color={COLORS.text} />
+                ) : (
+                  <Text style={styles.submitButtonText}>
+                    {editingGig ? 'Update Gig' : 'Create Gig'}
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </LinearGradient>
         </ScrollView>
       )}
 
@@ -613,10 +641,13 @@ export default function AdminDashboard() {
       <Modal
         visible={showCategoryModal}
         transparent
-        animationType="slide"
+        animationType="fade"
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+          <Animated.View 
+            style={[styles.modalContent, { opacity: fadeAnim }]}
+            // Removed invalid 'entering' property
+          >
             <Text style={styles.modalTitle}>Select Category</Text>
             
             <ScrollView style={styles.modalList}>
@@ -656,7 +687,7 @@ export default function AdminDashboard() {
             >
               <Text style={styles.modalCloseText}>Close</Text>
             </TouchableOpacity>
-          </View>
+          </Animated.View>
         </View>
       </Modal>
 
@@ -677,7 +708,7 @@ export default function AdminDashboard() {
               style={styles.closePreviewButton}
               onPress={() => setImagePreviewVisible(false)}
             >
-              <Ionicons name="close-circle" size={40} color="#fff" />
+              <Ionicons name="close-circle" size={40} color={COLORS.text} />
             </TouchableOpacity>
           </View>
         </View>
@@ -689,34 +720,36 @@ export default function AdminDashboard() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: COLORS.background,
+  },
+  headerGradient: {
+    elevation: 4,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 3,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: 16,
-    backgroundColor: '#3498db',
-    elevation: 4,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 2,
   },
   headerTitle: {
-    fontSize: 20,
+    fontSize: 22,
     fontWeight: 'bold',
-    color: '#fff',
+    color: COLORS.text,
   },
   addButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#2980b9',
+    backgroundColor: COLORS.primary,
     paddingHorizontal: 12,
     paddingVertical: 8,
-    borderRadius: 4,
+    borderRadius: 8,
+    elevation: 3,
   },
   buttonText: {
-    color: '#fff',
+    color: COLORS.text,
     fontWeight: 'bold',
     marginLeft: 4,
   },
@@ -727,51 +760,84 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 16,
   },
+  formCard: {
+    padding: 20,
+    borderRadius: 12,
+    marginBottom: 20,
+  },
   filterContainer: {
     flexDirection: 'row',
     padding: 16,
     paddingBottom: 8,
   },
+  searchInputContainer: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.inputBackground,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    marginRight: 8,
+    paddingHorizontal: 10,
+  },
+  searchIcon: {
+    marginRight: 8,
+  },
   searchInput: {
     flex: 1,
     height: 40,
-    backgroundColor: '#fff',
-    borderRadius: 4,
-    paddingHorizontal: 12,
-    marginRight: 8,
-    borderWidth: 1,
-    borderColor: '#ddd',
+    color: COLORS.text,
   },
   filterButton: {
-    justifyContent: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: 12,
-    backgroundColor: '#fff',
+    backgroundColor: COLORS.inputBackground,
     height: 40,
-    borderRadius: 4,
+    borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: COLORS.border,
+    minWidth: 130,
   },
   filterButtonText: {
-    color: '#555',
+    color: COLORS.textSecondary,
+    marginRight: 4,
   },
   gigList: {
     padding: 16,
     paddingTop: 8,
   },
   gigCard: {
-    backgroundColor: '#fff',
-    borderRadius: 8,
+    backgroundColor: COLORS.cardBackground,
+    borderRadius: 12,
     marginBottom: 16,
-    elevation: 2,
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
+    elevation: 4,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
     overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(138, 43, 226, 0.3)',
   },
   gigImage: {
     width: '100%',
     height: 160,
-    backgroundColor: '#f0f0f0',
+    backgroundColor: COLORS.inputBackground,
+  },
+  imageGradient: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 60,
+  },
+  noImageGradient: {
+    width: '100%',
+    height: 80,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   gigHeader: {
     flexDirection: 'row',
@@ -787,32 +853,55 @@ const styles = StyleSheet.create({
   gigTitle: {
     fontSize: 18,
     fontWeight: 'bold',
+    color: COLORS.text,
   },
   projectName: {
     fontSize: 14,
-    color: '#666',
+    color: COLORS.textSecondary,
     marginTop: 2,
   },
   categoryBadge: {
-    backgroundColor: '#e8f4fd',
-    paddingHorizontal: 8,
+    backgroundColor: 'rgba(138, 43, 226, 0.2)',
+    paddingHorizontal: 10,
     paddingVertical: 4,
-    borderRadius: 4,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(138, 43, 226, 0.5)',
     marginLeft: 8,
   },
   categoryText: {
-    color: '#3498db',
+    color: COLORS.secondary,
     fontSize: 12,
     fontWeight: '500',
   },
   gigDescription: {
-    color: '#555',
+    color: COLORS.textSecondary,
     marginBottom: 12,
     paddingHorizontal: 16,
   },
+  skillsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingHorizontal: 16,
+    marginBottom: 12,
+  },
+  skillBadge: {
+    backgroundColor: 'rgba(135, 206, 235, 0.15)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 16,
+    marginRight: 8,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(135, 206, 235, 0.3)',
+  },
+  skillText: {
+    color: COLORS.secondary,
+    fontSize: 12,
+  },
   gigMetadata: {
     flexDirection: 'row',
-    marginBottom: 16,
+    marginBottom: 12,
     flexWrap: 'wrap',
     paddingHorizontal: 16,
   },
@@ -824,7 +913,7 @@ const styles = StyleSheet.create({
   },
   metadataText: {
     marginLeft: 4,
-    color: '#555',
+    color: COLORS.textSecondary,
     fontSize: 13,
   },
   actionButtons: {
@@ -837,60 +926,62 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 4,
+    paddingVertical: 8,
+    borderRadius: 20,
     marginLeft: 8,
   },
   editButton: {
-    backgroundColor: '#3498db',
+    backgroundColor: COLORS.primary,
   },
   duplicateButton: {
-    backgroundColor: '#9b59b6',
+    backgroundColor: COLORS.accent,
   },
   deleteButton: {
-    backgroundColor: '#e74c3c',
+    backgroundColor: COLORS.error,
   },
   actionButtonText: {
-    color: '#fff',
+    color: COLORS.text,
     marginLeft: 4,
     fontSize: 12,
+    fontWeight: '500',
   },
   formTitle: {
-    fontSize: 20,
+    fontSize: 22,
     fontWeight: 'bold',
-    marginBottom: 16,
-    color: '#333',
+    marginBottom: 20,
+    color: COLORS.text,
   },
   inputLabel: {
     fontSize: 14,
     fontWeight: '500',
-    marginBottom: 4,
-    color: '#555',
+    marginBottom: 8,
+    color: COLORS.textSecondary,
   },
   input: {
-    backgroundColor: '#fff',
-    borderRadius: 4,
+    backgroundColor: COLORS.inputBackground,
+    borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#ddd',
-    padding: 10,
+    borderColor: COLORS.border,
+    padding: 12,
     marginBottom: 16,
+    color: COLORS.text,
   },
   pickerButton: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#fff',
-    borderRadius: 4,
+    backgroundColor: COLORS.inputBackground,
+    borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#ddd',
-    padding: 10,
+    borderColor: COLORS.border,
+    padding: 12,
     marginBottom: 16,
   },
   pickerText: {
-    color: '#333',
+    color: COLORS.text,
   },
   pickerPlaceholder: {
-    color: '#aaa',
+    color: 'rgba(176, 196, 222, 0.5)',
   },
   imageUploadContainer: {
     marginBottom: 16,
@@ -899,92 +990,105 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#f0f0f0',
-    borderRadius: 8
+    backgroundColor: COLORS.inputBackground,
+    borderRadius: 12,
+    padding: 30,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderStyle: 'dashed',
+  },
+  imageUploadText: {
+    marginLeft: 8,
+    color: COLORS.primary,
+  },
+  imagePreviewContainer: {
+    position: 'relative',
+    marginBottom: 8,
+    borderRadius: 12,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  imagePreview: {
+    width: '100%',
+    height: 200,
+    backgroundColor: COLORS.inputBackground,
+  },
+  removeImageButton: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    backgroundColor: 'rgba(20, 10, 30, 0.7)',
+    borderRadius: 12,
+    padding: 4,
   },
   textArea: {
-    backgroundColor: '#fff',
-    borderRadius: 4,
+    backgroundColor: COLORS.inputBackground,
+    borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#ddd',
-    padding: 10,
+    borderColor: COLORS.border,
+    padding: 12,
     marginBottom: 16,
     minHeight: 100,
-  },
-  radioGroup: {
-    flexDirection: 'row',
-    marginBottom: 16,
-  },
-  radioOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginRight: 16,
-  },
-  radio: {
-    height: 20,
-    width: 20,
-    borderRadius: 10,
-    borderWidth: 2,
-    borderColor: '#3498db',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  radioSelected: {
-    height: 10,
-    width: 10,
-    borderRadius: 5,
-    backgroundColor: '#3498db',
-  },
-  radioLabel: {
-    marginLeft: 8,
+    color: COLORS.text,
+    textAlignVertical: 'top',
   },
   formButtons: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 8,
-    marginBottom: 24,
+    marginTop: 16,
+    marginBottom: 16,
   },
   cancelButton: {
     flex: 1,
-    padding: 12,
-    borderRadius: 4,
+    padding: 14,
+    borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: COLORS.border,
     alignItems: 'center',
     marginRight: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
   },
   cancelButtonText: {
-    color: '#555',
+    color: COLORS.textSecondary,
+    fontWeight: '500',
   },
   submitButton: {
     flex: 2,
-    backgroundColor: '#3498db',
-    padding: 12,
-    borderRadius: 4,
+    backgroundColor: COLORS.primary,
+    padding: 14,
+    borderRadius: 8,
     alignItems: 'center',
+    elevation: 3,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 2,
   },
   submitButtonText: {
-    color: '#fff',
+    color: COLORS.text,
     fontWeight: 'bold',
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: COLORS.overlay,
     justifyContent: 'center',
     alignItems: 'center',
   },
   modalContent: {
     width: '80%',
-    backgroundColor: '#fff',
-    borderRadius: 8,
+    backgroundColor: COLORS.cardBackground,
+    borderRadius: 12,
     overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: COLORS.border,
   },
   modalTitle: {
     fontSize: 18,
     fontWeight: 'bold',
     padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    borderBottomColor: COLORS.border,
+    color: COLORS.text,
   },
   modalList: {
     maxHeight: 300,
@@ -992,20 +1096,21 @@ const styles = StyleSheet.create({
   modalItem: {
     padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    borderBottomColor: COLORS.border,
   },
   modalItemText: {
     fontSize: 16,
+    color: COLORS.text,
   },
   modalCloseButton: {
     padding: 16,
     alignItems: 'center',
     borderTopWidth: 1,
-    borderTopColor: '#eee',
-    backgroundColor: '#f9f9f9',
+    borderTopColor: COLORS.border,
+    backgroundColor: 'rgba(138, 43, 226, 0.1)',
   },
   modalCloseText: {
-    color: '#3498db',
+    color: COLORS.secondary,
     fontWeight: 'bold',
   },
   loader: {
@@ -1018,7 +1123,29 @@ const styles = StyleSheet.create({
   },
   emptyStateText: {
     marginTop: 8,
-    color: '#999',
+    color: COLORS.textSecondary,
     fontSize: 16,
+  },
+  imagePreviewModal: {
+    width: '90%',
+    height: '70%',
+    backgroundColor: 'transparent',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  fullScreenImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 12,
+  },
+  closePreviewButton: {
+    position: 'absolute',
+    top: -20,
+    right: -20,
+    backgroundColor: 'rgba(20, 10, 30, 0.5)',
+    borderRadius: 24,
+  },
+  closePreviewText: {
+    color: COLORS.text,
   },
 });
