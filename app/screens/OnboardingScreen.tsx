@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -11,17 +11,20 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
-  SafeAreaView
+  SafeAreaView,
+  Dimensions
 } from 'react-native';
 import { useAuth } from '../AuthContext';
-import { Ionicons } from '@expo/vector-icons'; // Assuming you're using Expo
+import { Ionicons } from '@expo/vector-icons';
 
 const interests = [
   { id: 'dev', name: 'Development', icon: 'code-slash' },
   { id: 'design', name: 'Design', icon: 'color-palette' },
   { id: 'content', name: 'Content Creation', icon: 'create' },
   { id: 'marketing', name: 'Marketing', icon: 'megaphone' },
-  { id: 'data', name: 'Data Analysis', icon: 'analytics' }
+  { id: 'data', name: 'Data Analysis', icon: 'analytics' },
+  { id: 'ai', name: 'AI & ML', icon: 'hardware-chip' },
+  { id: 'crypto', name: 'Crypto', icon: 'wallet' }
 ];
 
 export default function OnboardingScreen({ navigation }: any) {
@@ -30,15 +33,15 @@ export default function OnboardingScreen({ navigation }: any) {
   const [lastName, setLastName] = useState('');
   const [address, setAddress] = useState('');
   const [selectedInterests, setSelectedInterests] = useState<string[]>([]);
-  const [avatarUrl, setAvatarUrl] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [currentStep, setCurrentStep] = useState(1);
   const [errors, setErrors] = useState<{[key: string]: string}>({});
 
-  useEffect(() => {
-    // Update avatar URL when names change
+  const avatarUrl = useMemo(() => {
     if (firstName.trim() || lastName.trim()) {
-      setAvatarUrl(`https://ui-avatars.com/api/?name=${firstName}+${lastName}&background=random&size=200`);
+      return `https://ui-avatars.com/api/?name=${encodeURIComponent(firstName)}+${encodeURIComponent(lastName)}&background=random&size=200`;
     }
+    return 'https://ui-avatars.com/api/?background=random&size=200';
   }, [firstName, lastName]);
 
   const toggleInterest = (interest: string) => {
@@ -56,16 +59,16 @@ export default function OnboardingScreen({ navigation }: any) {
 
   const validateField = (field: string, value: string | string[]) => {
     if (field === 'firstName' && !value) {
-      return 'Please enter your first name';
+      return 'First name is required';
     }
     if (field === 'lastName' && !value) {
-      return 'Please enter your last name';
+      return 'Last name is required';
     }
     if (field === 'address') {
-      if (!value) return 'Please enter your wallet address';
-      // Simple Ethereum address validation (should be 42 chars including 0x prefix)
+      if (!value) return 'Wallet address is required';
+      // Enhanced Ethereum address validation
       if (!/^0x[a-fA-F0-9]{40}$/.test(value as string)) {
-        return 'Please enter a valid wallet address (0x...)';
+        return 'Please enter a valid Ethereum address (0x...)';
       }
     }
     if (field === 'interests' && (value as string[]).length === 0) {
@@ -74,20 +77,67 @@ export default function OnboardingScreen({ navigation }: any) {
     return '';
   };
 
-  const validateForm = () => {
-    const newErrors = {
-      firstName: validateField('firstName', firstName),
-      lastName: validateField('lastName', lastName),
-      address: validateField('address', address),
-      interests: validateField('interests', selectedInterests)
-    };
+  const validateCurrentStep = () => {
+    let isValid = true;
+    const newErrors = {...errors};
 
+    if (currentStep === 1) {
+      const firstNameError = validateField('firstName', firstName);
+      const lastNameError = validateField('lastName', lastName);
+      
+      if (firstNameError) {
+        newErrors.firstName = firstNameError;
+        isValid = false;
+      } else {
+        delete newErrors.firstName;
+      }
+      
+      if (lastNameError) {
+        newErrors.lastName = lastNameError;
+        isValid = false;
+      } else {
+        delete newErrors.lastName;
+      }
+    }
+    
+    if (currentStep === 2) {
+      const addressError = validateField('address', address);
+      
+      if (addressError) {
+        newErrors.address = addressError;
+        isValid = false;
+      } else {
+        delete newErrors.address;
+      }
+    }
+    
+    if (currentStep === 3) {
+      const interestsError = validateField('interests', selectedInterests);
+      
+      if (interestsError) {
+        newErrors.interests = interestsError;
+        isValid = false;
+      } else {
+        delete newErrors.interests;
+      }
+    }
+    
     setErrors(newErrors);
-    return !Object.values(newErrors).some(error => error);
+    return isValid;
+  };
+
+  const handleNextStep = () => {
+    if (validateCurrentStep()) {
+      setCurrentStep(prev => prev + 1);
+    }
+  };
+
+  const handlePrevStep = () => {
+    setCurrentStep(prev => Math.max(1, prev - 1));
   };
 
   const handleComplete = async () => {
-    if (!validateForm()) return;
+    if (!validateCurrentStep()) return;
 
     setIsLoading(true);
     try {
@@ -99,7 +149,7 @@ export default function OnboardingScreen({ navigation }: any) {
         onboardingCompleted: true,
         avatarUrl
       });
-      navigation.replace('Home');
+      navigation.navigate('Home');
     } catch (error) {
       console.error('Error updating profile:', error);
       Alert.alert('Error', 'Failed to update profile. Please try again.');
@@ -108,29 +158,55 @@ export default function OnboardingScreen({ navigation }: any) {
     }
   };
 
-  return (
-    <SafeAreaView style={styles.safeArea}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.keyboardAvoid}
-      >
-        <ScrollView 
-          contentContainerStyle={styles.container}
-          showsVerticalScrollIndicator={false}
-        >
-          <View style={styles.header}>
-            <Text style={styles.title}>Complete Your Profile</Text>
-            <Text style={styles.subtitle}>Tell us a bit about yourself</Text>
+  const renderProgressBar = () => {
+    return (
+      <View style={styles.progressContainer}>
+        {[1, 2, 3].map((step) => (
+          <View key={step} style={styles.progressStepContainer}>
+            <View 
+              style={[
+                styles.progressStep,
+                currentStep >= step ? styles.progressStepActive : {}
+              ]}
+            >
+              {currentStep > step ? (
+                <Ionicons name="checkmark" size={16} color="#FFFFFF" />
+              ) : (
+                <Text style={currentStep >= step ? styles.progressStepTextActive : styles.progressStepText}>
+                  {step}
+                </Text>
+              )}
+            </View>
+            {step < 3 && (
+              <View style={[
+                styles.progressLine,
+                currentStep > step ? styles.progressLineActive : {}
+              ]} />
+            )}
           </View>
+        ))}
+      </View>
+    );
+  };
 
-          <View style={styles.avatarContainer}>
-            <Image 
-              source={{ uri: avatarUrl || 'https://ui-avatars.com/api/?background=random&size=200' }}
-              style={styles.avatar}
-            />
-          </View>
+  const renderStepContent = () => {
+    switch (currentStep) {
+      case 1:
+        return (
+          <>
+            <View style={styles.stepHeader}>
+              <Text style={styles.stepTitle}>Personal Information</Text>
+              <Text style={styles.stepDescription}>Tell us who you are</Text>
+            </View>
+            
+            <View style={styles.avatarContainer}>
+              <Image 
+                source={{ uri: avatarUrl }}
+                style={styles.avatar}
+              />
+              <Text style={styles.avatarHint}>Profile preview</Text>
+            </View>
 
-          <View style={styles.formContainer}>
             <View style={styles.inputGroup}>
               <Text style={styles.label}>First Name</Text>
               <TextInput
@@ -143,6 +219,7 @@ export default function OnboardingScreen({ navigation }: any) {
                   if (errors.firstName) setErrors({...errors, firstName: ''});
                 }}
                 autoCapitalize="words"
+                returnKeyType="next"
               />
               {errors.firstName ? <Text style={styles.errorText}>{errors.firstName}</Text> : null}
             </View>
@@ -159,28 +236,68 @@ export default function OnboardingScreen({ navigation }: any) {
                   if (errors.lastName) setErrors({...errors, lastName: ''});
                 }}
                 autoCapitalize="words"
+                returnKeyType="done"
               />
               {errors.lastName ? <Text style={styles.errorText}>{errors.lastName}</Text> : null}
+            </View>
+          </>
+        );
+      
+      case 2:
+        return (
+          <>
+            <View style={styles.stepHeader}>
+              <Text style={styles.stepTitle}>Connect Your Wallet</Text>
+              <Text style={styles.stepDescription}>Enter your Ethereum wallet address</Text>
+            </View>
+            
+            <View style={styles.walletIconContainer}>
+              <Ionicons name="wallet-outline" size={64} color="#007AFF" />
             </View>
 
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Wallet Address</Text>
-              <TextInput
-                style={[styles.input, errors.address ? styles.inputError : null]}
-                placeholder="0x..."
-                value={address}
-                placeholderTextColor="gray"
-                onChangeText={(text) => {
-                  setAddress(text);
-                  if (errors.address) setErrors({...errors, address: ''});
-                }}
-                autoCapitalize="none"
-              />
+              <View style={styles.addressInputContainer}>
+                <TextInput
+                  style={[
+                    styles.input, 
+                    styles.addressInput,
+                    errors.address ? styles.inputError : null
+                  ]}
+                  placeholder="0x..."
+                  value={address}
+                  placeholderTextColor="gray"
+                  onChangeText={(text) => {
+                    setAddress(text);
+                    if (errors.address) setErrors({...errors, address: ''});
+                  }}
+                  autoCapitalize="none"
+                  returnKeyType="done"
+                />
+                <TouchableOpacity style={styles.pasteButton} onPress={() => Alert.alert('Info', 'Paste functionality would be implemented here')}>
+                  <Ionicons name="clipboard-outline" size={20} color="#007AFF" />
+                </TouchableOpacity>
+              </View>
               {errors.address ? <Text style={styles.errorText}>{errors.address}</Text> : null}
+              
+              <Text style={styles.addressHint}>
+                This address will be used for transactions on the Etherworks platform
+              </Text>
+            </View>
+          </>
+        );
+      
+      case 3:
+        return (
+          <>
+            <View style={styles.stepHeader}>
+              <Text style={styles.stepTitle}>Your Interests</Text>
+              <Text style={styles.stepDescription}>
+                Select topics that interest you to personalize your experience
+              </Text>
             </View>
 
             <View style={styles.interestsContainer}>
-              <Text style={styles.label}>Select Your Interests</Text>
               {errors.interests ? <Text style={styles.errorText}>{errors.interests}</Text> : null}
               
               <View style={styles.interestGrid}>
@@ -210,25 +327,84 @@ export default function OnboardingScreen({ navigation }: any) {
                   </TouchableOpacity>
                 ))}
               </View>
+              
+              <Text style={styles.interestsHint}>
+                You can always change these later in your profile settings
+              </Text>
             </View>
+          </>
+        );
+      default:
+        return null;
+    }
+  };
 
-            <TouchableOpacity
-              style={styles.submitButton}
-              onPress={handleComplete}
-              disabled={isLoading}
-            >
-              {isLoading ? (
-                <ActivityIndicator color="#FFFFFF" />
-              ) : (
-                <Text style={styles.submitButtonText}>Complete Profile</Text>
-              )}
-            </TouchableOpacity>
-          </View>
+  const renderNavButtons = () => {
+    const isLastStep = currentStep === 3;
+    
+    return (
+      <View style={styles.navButtonsContainer}>
+        {currentStep > 1 && (
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={handlePrevStep}
+            disabled={isLoading}
+          >
+            <Ionicons name="arrow-back" size={20} color="#007AFF" />
+            <Text style={styles.backButtonText}>Back</Text>
+          </TouchableOpacity>
+        )}
+        
+        <TouchableOpacity
+          style={[
+            styles.nextButton,
+            isLastStep ? styles.completeButton : {},
+            currentStep === 1 && styles.fullWidthButton
+          ]}
+          onPress={isLastStep ? handleComplete : handleNextStep}
+          disabled={isLoading}
+        >
+          {isLoading ? (
+            <ActivityIndicator color="#FFFFFF" />
+          ) : (
+            <>
+              <Text style={styles.nextButtonText}>
+                {isLastStep ? 'Complete Profile' : 'Continue'}
+              </Text>
+              {!isLastStep && <Ionicons name="arrow-forward" size={20} color="#FFFFFF" />}
+            </>
+          )}
+        </TouchableOpacity>
+      </View>
+    );
+  };
+
+  return (
+    <SafeAreaView style={styles.safeArea}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={styles.keyboardAvoid}
+      >
+        <View style={styles.header}>
+          <Text style={styles.title}>Etherworks</Text>
+          {renderProgressBar()}
+        </View>
+        
+        <ScrollView 
+          contentContainerStyle={styles.container}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          {renderStepContent()}
         </ScrollView>
+        
+        {renderNavButtons()}
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
+
+const { width } = Dimensions.get('window');
 
 const styles = StyleSheet.create({
   safeArea: {
@@ -238,23 +414,78 @@ const styles = StyleSheet.create({
   keyboardAvoid: {
     flex: 1,
   },
+  header: {
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  title: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#007AFF',
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  progressContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+  progressStepContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  progressStep: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#F0F0F0',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1,
+  },
+  progressStepActive: {
+    backgroundColor: '#007AFF',
+  },
+  progressStepText: {
+    color: '#666666',
+    fontWeight: '500',
+  },
+  progressStepTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '500',
+  },
+  progressLine: {
+    flex: 1,
+    height: 3,
+    backgroundColor: '#F0F0F0',
+    marginHorizontal: 5,
+  },
+  progressLineActive: {
+    backgroundColor: '#007AFF',
+  },
   container: {
     flexGrow: 1,
     padding: 20,
   },
-  header: {
+  stepHeader: {
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 24,
   },
-  title: {
-    fontSize: 28,
+  stepTitle: {
+    fontSize: 24,
     fontWeight: 'bold',
     color: '#333333',
     marginBottom: 8,
   },
-  subtitle: {
+  stepDescription: {
     fontSize: 16,
     color: '#666666',
+    textAlign: 'center',
   },
   avatarContainer: {
     alignItems: 'center',
@@ -267,11 +498,21 @@ const styles = StyleSheet.create({
     borderWidth: 3,
     borderColor: '#007AFF',
   },
-  formContainer: {
-    marginBottom: 20,
+  avatarHint: {
+    marginTop: 8,
+    fontSize: 14,
+    color: '#666666',
+  },
+  walletIconContainer: {
+    alignItems: 'center',
+    marginVertical: 20,
+    backgroundColor: '#F0F8FF',
+    padding: 20,
+    borderRadius: 60,
+    alignSelf: 'center',
   },
   inputGroup: {
-    marginBottom: 16,
+    marginBottom: 20,
   },
   label: {
     fontSize: 16,
@@ -288,6 +529,24 @@ const styles = StyleSheet.create({
     fontSize: 16,
     backgroundColor: '#F9F9F9',
   },
+  addressInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  addressInput: {
+    flex: 1,
+  },
+  pasteButton: {
+    position: 'absolute',
+    right: 10,
+    padding: 5,
+  },
+  addressHint: {
+    marginTop: 8,
+    fontSize: 14,
+    color: '#666666',
+    fontStyle: 'italic',
+  },
   inputError: {
     borderColor: '#FF3B30',
   },
@@ -303,7 +562,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     marginTop: 8,
-    marginHorizontal: -5,
+    justifyContent: 'center',
   },
   interestButton: {
     flexDirection: 'row',
@@ -312,7 +571,9 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 16,
     borderRadius: 25,
-    margin: 5,
+    margin: 6,
+    minWidth: width / 2 - 40,
+    justifyContent: 'center',
   },
   selectedInterest: {
     backgroundColor: '#007AFF',
@@ -326,22 +587,52 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontWeight: '500',
   },
-  submitButton: {
+  interestsHint: {
+    marginTop: 16,
+    fontSize: 14,
+    color: '#666666',
+    textAlign: 'center',
+    fontStyle: 'italic',
+  },
+  navButtonsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    padding: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#F0F0F0',
+  },
+  backButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 10,
+  },
+  backButtonText: {
+    color: '#007AFF',
+    fontSize: 16,
+    fontWeight: '500',
+    marginLeft: 5,
+  },
+  nextButton: {
     backgroundColor: '#007AFF',
-    height: 56,
-    borderRadius: 12,
+    height: 50,
+    borderRadius: 25,
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 24,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
+    paddingHorizontal: 20,
+    flexDirection: 'row',
+    flex: 1,
+    marginLeft: 10,
   },
-  submitButtonText: {
+  fullWidthButton: {
+    marginLeft: 0,
+  },
+  completeButton: {
+    backgroundColor: '#34C759',
+  },
+  nextButtonText: {
     color: '#FFFFFF',
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '600',
-  },
+    marginRight: 5,
+  }
 });

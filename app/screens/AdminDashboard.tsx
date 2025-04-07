@@ -19,7 +19,6 @@ import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 
-// Predefined categories for better data consistency
 const CATEGORIES = [
   'Design', 'Development', 'Writing', 'Marketing', 
   'Customer Support', 'Research', 'Data Entry', 'Other'
@@ -39,7 +38,7 @@ export default function AdminDashboard() {
   const [imageUrl, setImageUrl] = useState('');
   const [uploadingImage, setUploadingImage] = useState(false);
   
-  // UI states
+  
   const [isLoading, setIsLoading] = useState(false);
   const [existingGigs, setExistingGigs] = useState([]);
   const [showCategoryModal, setShowCategoryModal] = useState(false);
@@ -50,7 +49,7 @@ export default function AdminDashboard() {
   const [imagePreviewVisible, setImagePreviewVisible] = useState(false);
   const [previewImageUrl, setPreviewImageUrl] = useState('');
   
-  // Fetch existing gigs on component mount
+  // Fetch existing gigs
   useEffect(() => {
     fetchGigs();
     requestMediaLibraryPermissions();
