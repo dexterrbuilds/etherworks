@@ -1,6 +1,39 @@
-import React, { useState } from 'react';
-import { View, TextInput, TouchableOpacity, StyleSheet, Text, ScrollView, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { 
+  View, 
+  TextInput, 
+  TouchableOpacity, 
+  StyleSheet, 
+  Text, 
+  ScrollView, 
+  ActivityIndicator, 
+  KeyboardAvoidingView, 
+  Platform,
+  Animated,
+  Dimensions,
+  StatusBar,
+  Image
+} from 'react-native';
 import { useAuth } from '../AuthContext';
+import { Feather } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+// Web3 theme colors
+const COLORS = {
+  background: '#2E1A47', // deep indigo
+  primary: '#8A2BE2',    // electric purple
+  secondary: '#87CEEB',  // sky blue
+  text: '#FFFFFF',       // white
+  textSecondary: '#B0C4DE', // light slate
+  cardBackground: '#3C2157',
+  inputBackground: '#251539',
+  border: '#4A2963',
+  error: '#FF5252',
+  success: '#4CAF50'
+};
+
+const { width, height } = Dimensions.get('window');
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
@@ -8,7 +41,29 @@ export default function LoginScreen() {
   const [isSignUp, setIsSignUp] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const { signIn, signUp } = useAuth();
+  const insets = useSafeAreaInsets();
+
+  // Animation values
+  const fadeAnim = useState(new Animated.Value(0))[0];
+  const slideAnim = useState(new Animated.Value(50))[0];
+  
+  useEffect(() => {
+    // Start animations when component mounts
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 800,
+        useNativeDriver: true,
+      }),
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: 600,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, []);
 
   // Form validation
   const validateForm = () => {
@@ -53,7 +108,16 @@ export default function LoginScreen() {
       }
     } catch (error) {
       if (error instanceof Error) {
-        setErrorMessage(error.message);
+        // Customize error messages for better user experience
+        if (error.message.includes('auth/user-not-found') || error.message.includes('auth/wrong-password')) {
+          setErrorMessage('Invalid email or password');
+        } else if (error.message.includes('auth/email-already-in-use')) {
+          setErrorMessage('This email is already registered');
+        } else if (error.message.includes('auth/network-request-failed')) {
+          setErrorMessage('Network error. Please check your connection');
+        } else {
+          setErrorMessage(error.message);
+        }
       } else {
         setErrorMessage('An unknown error occurred');
       }
@@ -63,166 +127,367 @@ export default function LoginScreen() {
   };
 
   const switchMode = () => {
+    // Reset fields when switching modes
     setIsSignUp(!isSignUp);
     setErrorMessage('');
+    setPassword('');
+  };
+
+  const togglePasswordVisibility = () => {
+    setShowPassword(!showPassword);
   };
 
   return (
-    <KeyboardAvoidingView
-      style={{ flex: 1 }}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
-      <ScrollView contentContainerStyle={styles.container}>
-        <View style={styles.logoContainer}>
-          <Text style={styles.logo}>Etherworks</Text>
-          <Text style={styles.tagline}>Your gateway to the digital realm</Text>
-        </View>
-
-        <View style={styles.formContainer}>
-          <Text style={styles.title}>{isSignUp ? 'Create Account' : 'Welcome Back'}</Text>
-          
-          <TextInput
-            style={styles.input}
-            placeholder="Email"
-            value={email}
-            placeholderTextColor="gray"
-            onChangeText={setEmail}
-            autoCapitalize="none"
-            keyboardType="email-address"
-            autoComplete="email"
-          />
-          
-          <TextInput
-            style={styles.input}
-            placeholder="Password"
-            value={password}
-            placeholderTextColor="gray"
-            onChangeText={setPassword}
-            secureTextEntry
-            autoComplete={isSignUp ? "password-new" : "password"}
-          />
-
-          {errorMessage ? (
-            <Text style={styles.errorText}>{errorMessage}</Text>
-          ) : null}
-
-          <TouchableOpacity
-            style={styles.primaryButton}
-            onPress={handleAuth}
-            disabled={isLoading}
+    <View style={[styles.container, { paddingTop: insets.top }]}>
+      <StatusBar barStyle="light-content" backgroundColor={COLORS.background} />
+      
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+        <ScrollView 
+          contentContainerStyle={styles.scrollContainer}
+          showsVerticalScrollIndicator={false}
+        >
+          <Animated.View 
+            style={[
+              styles.contentContainer, 
+              { 
+                opacity: fadeAnim,
+                transform: [{ translateY: slideAnim }] 
+              }
+            ]}
           >
-            {isLoading ? (
-              <ActivityIndicator color="#fff" size="small" />
-            ) : (
-              <Text style={styles.buttonText}>{isSignUp ? "Create Account" : "Sign In"}</Text>
-            )}
-          </TouchableOpacity>
-          
-          <View style={styles.switchContainer}>
-            <Text style={styles.switchText}>
-              {isSignUp ? "Already have an account?" : "Don't have an account?"}
+            <View style={styles.logoContainer}>
+              <LinearGradient
+                colors={[COLORS.primary, COLORS.secondary]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.logoGradient}
+              >
+                <Feather name="box" size={48} color={COLORS.text} />
+              </LinearGradient>
+              <Text style={styles.logo}>Etherworks</Text>
+              <Text style={styles.tagline}>Your gateway to the digital realm</Text>
+            </View>
+
+            <View style={styles.formContainer}>
+              <Text style={styles.title}>{isSignUp ? 'Create Account' : 'Welcome Back'}</Text>
+              
+              <View style={styles.inputContainer}>
+                <Feather name="mail" size={20} color={COLORS.textSecondary} style={styles.inputIcon} />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Email"
+                  value={email}
+                  placeholderTextColor={COLORS.textSecondary}
+                  onChangeText={setEmail}
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                  autoComplete="email"
+                  selectionColor={COLORS.secondary}
+                />
+              </View>
+              
+              <View style={styles.inputContainer}>
+                <Feather name="lock" size={20} color={COLORS.textSecondary} style={styles.inputIcon} />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Password"
+                  value={password}
+                  placeholderTextColor={COLORS.textSecondary}
+                  onChangeText={setPassword}
+                  secureTextEntry={!showPassword}
+                  autoComplete={isSignUp ? "password-new" : "password"}
+                  selectionColor={COLORS.secondary}
+                />
+                <TouchableOpacity 
+                  style={styles.passwordToggle} 
+                  onPress={togglePasswordVisibility}
+                >
+                  <Feather 
+                    name={showPassword ? "eye-off" : "eye"} 
+                    size={20} 
+                    color={COLORS.textSecondary} 
+                  />
+                </TouchableOpacity>
+              </View>
+
+              {errorMessage ? (
+                <View style={styles.errorContainer}>
+                  <Feather name="alert-circle" size={16} color={COLORS.error} />
+                  <Text style={styles.errorText}>{errorMessage}</Text>
+                </View>
+              ) : null}
+
+              <TouchableOpacity
+                style={styles.primaryButton}
+                onPress={handleAuth}
+                disabled={isLoading}
+                activeOpacity={0.8}
+              >
+                <LinearGradient
+                  colors={[COLORS.primary, '#6F42C1']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={styles.buttonGradient}
+                >
+                  {isLoading ? (
+                    <ActivityIndicator color={COLORS.text} size="small" />
+                  ) : (
+                    <>
+                      <Feather 
+                        name={isSignUp ? "user-plus" : "log-in"} 
+                        size={18} 
+                        color={COLORS.text} 
+                        style={styles.buttonIcon} 
+                      />
+                      <Text style={styles.buttonText}>
+                        {isSignUp ? "Create Account" : "Sign In"}
+                      </Text>
+                    </>
+                  )}
+                </LinearGradient>
+              </TouchableOpacity>
+              
+              <View style={styles.divider}>
+                <View style={styles.dividerLine} />
+                <Text style={styles.dividerText}>or</Text>
+                <View style={styles.dividerLine} />
+              </View>
+              
+              <View style={styles.switchContainer}>
+                <Text style={styles.switchText}>
+                  {isSignUp ? "Already have an account?" : "Don't have an account?"}
+                </Text>
+                <TouchableOpacity onPress={switchMode}>
+                  <Text style={styles.switchButton}>
+                    {isSignUp ? "Sign In" : "Sign Up"}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+              
+              {!isSignUp && (
+                <TouchableOpacity style={styles.forgotPassword}>
+                  <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+            
+            {/* Terms and privacy policy */}
+            <Text style={styles.termsText}>
+              By continuing, you agree to our{' '}
+              <Text style={styles.termsLink}>Terms of Service</Text> and{' '}
+              <Text style={styles.termsLink}>Privacy Policy</Text>
             </Text>
-            <TouchableOpacity onPress={switchMode}>
-              <Text style={styles.switchButton}>{isSignUp ? "Sign In" : "Sign Up"}</Text>
-            </TouchableOpacity>
-          </View>
-          
-          {!isSignUp && (
-            <TouchableOpacity style={styles.forgotPassword}>
-              <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+          </Animated.View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+      
+      {/* Animated background elements */}
+      <View style={styles.bgElementsContainer}>
+        <View style={[styles.bgElement, styles.bgElement1]} />
+        <View style={[styles.bgElement, styles.bgElement2]} />
+        <View style={[styles.bgElement, styles.bgElement3]} />
+      </View>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+  },
+  scrollContainer: {
     flexGrow: 1,
     justifyContent: 'center',
-    padding: 20,
-    backgroundColor: '#f8f9fa',
+    paddingHorizontal: 20,
+  },
+  contentContainer: {
+    width: '100%',
+    maxWidth: 400,
+    alignSelf: 'center',
+    paddingVertical: 40,
   },
   logoContainer: {
     alignItems: 'center',
-    marginBottom: 40,
+    marginBottom: 30,
+  },
+  logoGradient: {
+    width: 80,
+    height: 80,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
   },
   logo: {
     fontSize: 32,
     fontWeight: 'bold',
-    color: '#3a86ff',
+    color: COLORS.text,
+    marginBottom: 8,
   },
   tagline: {
-    color: '#6c757d',
+    color: COLORS.textSecondary,
     fontSize: 14,
-    marginTop: 6,
   },
   formContainer: {
-    backgroundColor: '#ffffff',
-    borderRadius: 10,
-    padding: 20,
+    backgroundColor: COLORS.cardBackground,
+    borderRadius:.016 * width,
+    padding: 24,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.2,
+    shadowRadius: 16,
+    elevation: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(138, 43, 226, 0.3)',
   },
   title: {
-    fontSize: 22,
+    fontSize: 24,
     fontWeight: 'bold',
-    marginBottom: 20,
+    marginBottom: 24,
     textAlign: 'center',
-    color: '#212529',
+    color: COLORS.text,
+  },
+  inputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.inputBackground,
+    borderRadius: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    height: 56,
+  },
+  inputIcon: {
+    paddingHorizontal: 16,
   },
   input: {
-    height: 50,
-    borderColor: '#ced4da',
-    borderWidth: 1,
+    flex: 1,
+    height: '100%',
+    color: COLORS.text,
+    fontSize: 16,
+  },
+  passwordToggle: {
+    padding: 16,
+  },
+  errorContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 82, 82, 0.1)',
+    padding: 12,
     borderRadius: 8,
     marginBottom: 16,
-    paddingHorizontal: 12,
-    fontSize: 16,
-    backgroundColor: '#f8f9fa',
   },
   errorText: {
-    color: '#dc3545',
-    marginBottom: 16,
-    textAlign: 'center',
+    color: COLORS.error,
+    marginLeft: 8,
+    fontSize: 14,
+    flex: 1,
   },
   primaryButton: {
-    backgroundColor: '#3a86ff',
-    borderRadius: 8,
-    height: 50,
+    borderRadius: 12,
+    height: 56,
+    marginTop: 8,
+    overflow: 'hidden',
+  },
+  buttonGradient: {
+    flexDirection: 'row',
+    height: '100%',
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 8,
+  },
+  buttonIcon: {
+    marginRight: 8,
   },
   buttonText: {
-    color: '#ffffff',
+    color: COLORS.text,
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  divider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 24,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: 'rgba(138, 43, 226, 0.3)',
+  },
+  dividerText: {
+    color: COLORS.textSecondary,
+    paddingHorizontal: 16,
+    fontSize: 14,
   },
   switchContainer: {
     flexDirection: 'row',
     justifyContent: 'center',
-    marginTop: 20,
     alignItems: 'center',
   },
   switchText: {
-    color: '#6c757d',
-    marginRight: 5,
+    color: COLORS.textSecondary,
+    marginRight: 8,
+    fontSize: 14,
   },
   switchButton: {
-    color: '#3a86ff',
+    color: COLORS.secondary,
     fontWeight: 'bold',
+    fontSize: 14,
   },
   forgotPassword: {
     alignItems: 'center',
     marginTop: 16,
   },
   forgotPasswordText: {
-    color: '#3a86ff',
+    color: COLORS.secondary,
+    fontSize: 14,
+  },
+  termsText: {
+    textAlign: 'center',
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    marginTop: 24,
+    paddingHorizontal: 16,
+  },
+  termsLink: {
+    color: COLORS.secondary,
+  },
+  bgElementsContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: -1,
+    overflow: 'hidden',
+  },
+  bgElement: {
+    position: 'absolute',
+    borderRadius: 100,
+    opacity: 0.15,
+  },
+  bgElement1: {
+    width: 300,
+    height: 300,
+    backgroundColor: COLORS.primary,
+    top: -100,
+    right: -100,
+  },
+  bgElement2: {
+    width: 200,
+    height: 200,
+    backgroundColor: COLORS.secondary,
+    bottom: 100,
+    left: -70,
+  },
+  bgElement3: {
+    width: 250,
+    height: 250,
+    backgroundColor: COLORS.primary,
+    bottom: -100,
+    right: -50,
   },
 });
