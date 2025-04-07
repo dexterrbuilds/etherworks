@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { 
   View, 
   Text, 
@@ -9,59 +9,112 @@ import {
   RefreshControl,
   StatusBar,
   TextInput,
-  Image
+  Image,
+  ActivityIndicator
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { dummyGigs } from '../data/gigs';
-import type { Gig } from '../types/gig';
 import { Feather } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { db } from '../../firebaseConfig';
+import { collection, getDocs, query, orderBy, where } from 'firebase/firestore';
 
-type TabType = 'open' | 'in_review' | 'completed';
-type CategoryType = 'all' | 'Content Creation' | 'Design' | 'Development';
+type TabType = 'Open' | 'In Review' | 'Completed';
+type CategoryType = 'all' | 'Content Creation' | 'Design' | 'Development' | 'Marketing' | 'Customer Support' | 'Research' | 'Data Entry' | 'Other';
+
+// Map from internal status to display status
+const STATUS_MAP = {
+  'Open': 'Open',
+  'In Review': 'In Review',
+  'Completed': 'Completed'
+};
 
 // Define tab data for easier management
 const TABS: Array<{id: TabType; label: string; icon: string}> = [
-  { id: 'open', label: 'Open Gigs', icon: 'calendar' },
-  { id: 'in_review', label: 'In Review', icon: 'clock' },
-  { id: 'completed', label: 'Completed', icon: 'check-circle' }
+  { id: 'Open', label: 'Open Gigs', icon: 'calendar' },
+  { id: 'In Review', label: 'In Review', icon: 'clock' },
+  { id: 'Completed', label: 'Completed', icon: 'check-circle' }
 ];
 
-// Define category data
+// Define category data based on the categories in AdminDashboard
 const CATEGORIES: Array<{id: CategoryType; label: string}> = [
   { id: 'all', label: 'All Opportunities' },
-  { id: 'Content Creation', label: 'Content Creation' },
   { id: 'Design', label: 'Design' },
-  { id: 'Development', label: 'Development' }
+  { id: 'Development', label: 'Development' },
+  { id: 'Writing', label: 'Writing' },
+  { id: 'Marketing', label: 'Marketing' },
+  { id: 'Customer Support', label: 'Customer Support' },
+  { id: 'Research', label: 'Research' },
+  { id: 'Data Entry', label: 'Data Entry' },
+  { id: 'Other', label: 'Other' }
 ];
 
 export default function HomeScreen() {
-  const [activeTab, setActiveTab] = useState<TabType>('open');
+  const [activeTab, setActiveTab] = useState<TabType>('Open');
   const [activeCategory, setActiveCategory] = useState<CategoryType>('all');
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [gigs, setGigs] = useState([]);
   const navigation = useNavigation<any>();
   const insets = useSafeAreaInsets();
 
-  // Use useMemo to prevent unnecessary recalculations on each render
+  // Fetch gigs from Firestore
+  const fetchGigs = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      let gigsQuery = collection(db, 'gigs');
+      
+      // We're retrieving all gigs and will filter them in-memory
+      // for better user experience when switching tabs/categories
+      gigsQuery = query(gigsQuery, orderBy('createdAt', 'desc'));
+      
+      const querySnapshot = await getDocs(gigsQuery);
+      const gigsData = [];
+      
+      querySnapshot.forEach((doc) => {
+        gigsData.push({ 
+          id: doc.id, 
+          ...doc.data(),
+          // Set a default status if none exists
+          status: doc.data().status || 'Open'
+        });
+      });
+      
+      setGigs(gigsData);
+    } catch (error) {
+      console.error('Error fetching gigs:', error);
+    } finally {
+      setIsLoading(false);
+      setIsRefreshing(false);
+    }
+  }, []);
+
+  // Initial load
+  useEffect(() => {
+    fetchGigs();
+  }, [fetchGigs]);
+
+  // Filter gigs based on active tab, category, and search term
   const filteredGigs = useMemo(() => {
-    return dummyGigs.filter(gig => {
+    return gigs.filter(gig => {
       const statusMatch = gig.status === activeTab;
       const categoryMatch = activeCategory === 'all' || gig.category === activeCategory;
       const searchMatch = searchTerm === '' || 
         gig.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        gig.description.toLowerCase().includes(searchTerm.toLowerCase());
+        gig.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (gig.skills && gig.skills.some(skill => 
+          skill.toLowerCase().includes(searchTerm.toLowerCase())
+        ));
       
       return statusMatch && categoryMatch && searchMatch;
     });
-  }, [activeTab, activeCategory, searchTerm]);
+  }, [gigs, activeTab, activeCategory, searchTerm]);
 
-  // Simulate a refresh - improved with useCallback
+  // Handle refresh - now actually refetches data
   const handleRefresh = useCallback(() => {
     setIsRefreshing(true);
-    // In a real app, you would fetch new data here
-    setTimeout(() => setIsRefreshing(false), 1500);
-  }, []);
+    fetchGigs();
+  }, [fetchGigs]);
 
   const handleTabPress = useCallback((id: TabType) => {
     setActiveTab(id);
@@ -71,12 +124,8 @@ export default function HomeScreen() {
     setActiveCategory(id);
   }, []);
 
-  const navigateToGigDetails = useCallback((gigId: number) => {
+  const navigateToGigDetails = useCallback((gigId: string) => {
     navigation.navigate('GigDetails', { gigId });
-  }, [navigation]);
-
-  const navigateToProfile = useCallback(() => {
-    navigation.navigate('Profile');
   }, [navigation]);
 
   const renderTab = useCallback(({ id, label, icon }: {id: TabType; label: string; icon: string}) => (
@@ -124,8 +173,13 @@ export default function HomeScreen() {
     </TouchableOpacity>
   ), [activeCategory, handleCategoryPress]);
 
-  const renderGigCard = useCallback(({ item }: { item: Gig }) => {
-    const deadlineDate = new Date(item.deadline);
+  const renderGigCard = useCallback(({ item }) => {
+    // Check if there's a deadline, otherwise use a default date (7 days from creation)
+    const createdDate = item.createdAt ? new Date(item.createdAt) : new Date();
+    const defaultDeadline = new Date(createdDate);
+    defaultDeadline.setDate(defaultDeadline.getDate() + 7);
+    
+    const deadlineDate = item.deadline ? new Date(item.deadline) : defaultDeadline;
     const today = new Date();
     const isUrgent = deadlineDate <= today || 
       (deadlineDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24) <= 2;
@@ -133,21 +187,29 @@ export default function HomeScreen() {
     return (
       <TouchableOpacity
         style={[styles.gigCard, isUrgent && styles.urgentGigCard]}
-        onPress={() => navigateToGigDetails(Number(item.id))}
+        onPress={() => navigateToGigDetails(item.id)}
         accessibilityRole="button"
-        accessibilityLabel={`${item.title} gig, payout $${item.payout}, deadline ${item.deadline}`}
+        accessibilityLabel={`${item.title} gig, payout $${item.payout}`}
         accessible={true}
         activeOpacity={0.7}
       >
         <View style={styles.gigCardInner}>
+          {item.imageBase64 ? (
+            <Image 
+              source={{ uri: item.imageBase64 }} 
+              style={styles.gigImage} 
+              resizeMode="cover"
+            />
+          ) : null}
+          
           <View style={styles.gigHeader}>
             <View style={styles.gigTitleContainer}>
               <Text style={styles.gigTitle} numberOfLines={1} ellipsizeMode="tail">
                 {item.title}
               </Text>
               <View style={styles.clientInfoContainer}>
-                <Feather name="user" size={12} color="#B0C4DE" />
-                <Text style={styles.clientInfo}>{item.client || "Anonymous Client"}</Text>
+                <Feather name="briefcase" size={12} color="#B0C4DE" />
+                <Text style={styles.clientInfo}>{item.projectName || "Unnamed Project"}</Text>
               </View>
             </View>
             <View style={styles.payoutContainer}>
@@ -160,18 +222,20 @@ export default function HomeScreen() {
             {item.description}
           </Text>
           
-          <ScrollView 
-            horizontal 
-            showsHorizontalScrollIndicator={false} 
-            style={styles.skillsScrollView}
-            contentContainerStyle={styles.skillsContentContainer}
-          >
-            {item.skills.map((skill, index) => (
-              <View key={index} style={styles.skillTag}>
-                <Text style={styles.skillText}>{skill}</Text>
-              </View>
-            ))}
-          </ScrollView>
+          {item.skills && item.skills.length > 0 && (
+            <ScrollView 
+              horizontal 
+              showsHorizontalScrollIndicator={false} 
+              style={styles.skillsScrollView}
+              contentContainerStyle={styles.skillsContentContainer}
+            >
+              {item.skills.map((skill, index) => (
+                <View key={index} style={styles.skillTag}>
+                  <Text style={styles.skillText}>{skill}</Text>
+                </View>
+              ))}
+            </ScrollView>
+          )}
           
           <View style={styles.gigFooter}>
             <View style={styles.deadlineContainer}>
@@ -185,20 +249,20 @@ export default function HomeScreen() {
                 styles.deadline, 
                 isUrgent && styles.urgentDeadline
               ]}>
-                Due: {formatDate(item.deadline)}
+                Est. Time: {item.duration || "Not specified"}
               </Text>
             </View>
             <View style={styles.statusSection}>
               <View style={styles.statusContainer}>
-                <View style={[styles.statusIndicator, styles[`status_${item.status}`]]} />
+                <View style={[styles.statusIndicator, styles[`status_${item.status.toLowerCase().replace(' ', '_')}`]]} />
                 <Text style={styles.statusText}>
-                  {item.status === 'open' ? 'Open' : item.status === 'in_review' ? 'In Review' : 'Completed'}
+                  {STATUS_MAP[item.status] || item.status}
                 </Text>
               </View>
-              {isUrgent && (
-                <View style={styles.urgentBadge}>
-                  <Feather name="alert-circle" size={10} color="#87CEEB" style={styles.urgentIcon} />
-                  <Text style={styles.urgentBadgeText}>Urgent</Text>
+              {item.location && (
+                <View style={styles.locationBadge}>
+                  <Feather name="map-pin" size={10} color="#B0C4DE" style={styles.locationIcon} />
+                  <Text style={styles.locationText}>{item.location}</Text>
                 </View>
               )}
             </View>
@@ -214,7 +278,7 @@ export default function HomeScreen() {
       <Text style={styles.emptyStateTitle}>No gigs found</Text>
       <Text style={styles.emptyStateText}>
         There are no {activeCategory !== 'all' ? activeCategory + ' ' : ''}gigs
-        {activeTab === 'open' ? ' available' : activeTab === 'in_review' ? ' in review' : ' completed'} at the moment.
+        {activeTab === 'Open' ? ' available' : activeTab === 'In Review' ? ' in review' : ' completed'} at the moment.
       </Text>
       <TouchableOpacity 
         style={styles.refreshButton}
@@ -227,38 +291,21 @@ export default function HomeScreen() {
     </View>
   ), [activeCategory, activeTab, handleRefresh]);
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    const today = new Date();
-    
-    if (date.toDateString() === today.toDateString()) {
-      return 'Today';
-    }
-    
-    const tomorrow = new Date(today);
-    tomorrow.setDate(today.getDate() + 1);
-    if (date.toDateString() === tomorrow.toDateString()) {
-      return 'Tomorrow';
-    }
-    
-    // For dates within the next 6 days, show day name
-    const withinWeek = (date.getTime() - today.getTime()) / (1000 * 60 * 60 * 24) < 7;
-    if (withinWeek) {
-      return date.toLocaleDateString('en-US', { weekday: 'short' });
-    }
-    
-    // Otherwise show formatted date
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  };
+  const renderLoading = useCallback(() => (
+    <View style={styles.loadingContainer}>
+      <ActivityIndicator size="large" color="#8A2BE2" />
+      <Text style={styles.loadingText}>Loading gigs...</Text>
+    </View>
+  ), []);
 
   return (
     <View style={[
       styles.container,
       { paddingTop: insets.top }
     ]}>
-      <StatusBar barStyle="light-content" backgroundColor="#001B2A" />
+      <StatusBar barStyle="light-content" backgroundColor="#2E1A47" />
       
-      {/* Improved search bar */}
+      {/* Search bar */}
       <View style={styles.searchBarContainer}>
         <Feather name="search" size={16} color="#8CABA9" style={styles.searchIcon} />
         <TextInput
@@ -294,8 +341,10 @@ export default function HomeScreen() {
         </ScrollView>
       </View>
       
-      {/* Gigs list */}
-      {filteredGigs.length > 0 ? (
+      {/* Gigs list with loading state */}
+      {isLoading && !isRefreshing ? (
+        renderLoading()
+      ) : filteredGigs.length > 0 ? (
         <FlatList
           data={filteredGigs}
           renderItem={renderGigCard}
@@ -306,12 +355,14 @@ export default function HomeScreen() {
             <RefreshControl
               refreshing={isRefreshing}
               onRefresh={handleRefresh}
-              colors={['#780000']}
-              tintColor="#780000"
+              colors={['#8A2BE2']}
+              tintColor="#8A2BE2"
             />
           }
         />
-      ) : renderEmptyState()}
+      ) : (
+        renderEmptyState()
+      )}
     </View>
   );
 }
@@ -341,7 +392,6 @@ const styles = StyleSheet.create({
     flex: 1,
     color: '#FFFFFF', // White text
     fontSize: 14,
-    fontFamily: 'Satoshi-Regular',
     padding: 0,
     height: 20,
   },
@@ -375,10 +425,11 @@ const styles = StyleSheet.create({
   tabText: {
     color: '#B0C4DE', // Light slate
     fontSize: 14,
-    fontFamily: 'Satoshi-Medium',
+    fontWeight: '500',
   },
   activeTabText: {
     color: '#FFFFFF', // White
+    fontWeight: '600',
   },
   categoriesBackground: {
     backgroundColor: '#2E1A47', // Dark indigo
@@ -410,10 +461,11 @@ const styles = StyleSheet.create({
   categoryFilterText: {
     color: '#B0C4DE', // Light slate
     fontSize: 14,
-    fontFamily: 'Satoshi-Medium',
+    fontWeight: '500',
   },
   activeCategoryFilterText: {
     color: '#FFFFFF', // White
+    fontWeight: '600',
   },
   gigsContainer: {
     padding: 16,
@@ -429,6 +481,12 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 5,
+  },
+  gigImage: {
+    width: '100%',
+    height: 160,
+    backgroundColor: '#2E1A47',
+    marginBottom: 12,
   },
   gigCardInner: {
     padding: 16,
@@ -458,7 +516,24 @@ const styles = StyleSheet.create({
   urgentBadgeText: {
     color: '#87CEEB', // Sky blue
     fontSize: 10,
-    fontFamily: 'Satoshi-Bold',
+    fontWeight: 'bold',
+  },
+  locationBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(176, 196, 222, 0.1)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
+    marginLeft: 8,
+  },
+  locationIcon: {
+    marginRight: 4,
+  },
+  locationText: {
+    color: '#B0C4DE',
+    fontSize: 10,
+    fontWeight: '500',
   },
   gigHeader: {
     flexDirection: 'row',
@@ -472,7 +547,7 @@ const styles = StyleSheet.create({
   },
   gigTitle: {
     fontSize: 18,
-    fontFamily: 'Satoshi-Bold',
+    fontWeight: 'bold',
     color: '#FFFFFF', // White
     flex: 1,
     marginBottom: 6,
@@ -485,18 +560,17 @@ const styles = StyleSheet.create({
   },
   payoutLabel: {
     fontSize: 10,
-    fontFamily: 'Satoshi-Medium',
+    fontWeight: '500',
     color: '#B0C4DE', // Light slate
     marginBottom: 2,
   },
   gigPayout: {
     fontSize: 18,
-    fontFamily: 'Satoshi-Bold',
+    fontWeight: 'bold',
     color: '#8A2BE2', // Electric purple
   },
   gigDescription: {
     fontSize: 14,
-    fontFamily: 'Satoshi-Regular',
     color: '#B0C4DE', // Light slate
     marginBottom: 14,
     lineHeight: 20,
@@ -508,7 +582,7 @@ const styles = StyleSheet.create({
   },
   clientInfo: {
     fontSize: 12,
-    fontFamily: 'Satoshi-Medium',
+    fontWeight: '500',
     color: '#B0C4DE', // Light slate
     marginLeft: 4,
   },
@@ -530,7 +604,7 @@ const styles = StyleSheet.create({
   skillText: {
     color: '#87CEEB', // Sky blue
     fontSize: 12,
-    fontFamily: 'Satoshi-Medium',
+    fontWeight: '500',
   },
   gigFooter: {
     flexDirection: 'row',
@@ -549,12 +623,11 @@ const styles = StyleSheet.create({
   },
   deadline: {
     fontSize: 13,
-    fontFamily: 'Satoshi-Regular',
     color: '#B0C4DE', // Light slate
   },
   urgentDeadline: {
     color: '#87CEEB', // Sky blue
-    fontFamily: 'Satoshi-Bold',
+    fontWeight: 'bold',
   },
   statusSection: {
     flexDirection: 'row',
@@ -576,7 +649,7 @@ const styles = StyleSheet.create({
   },
   statusText: {
     fontSize: 12,
-    fontFamily: 'Satoshi-Medium',
+    fontWeight: '500',
     color: '#FFFFFF', // White
   },
   status_open: {
@@ -596,14 +669,13 @@ const styles = StyleSheet.create({
   },
   emptyStateTitle: {
     fontSize: 20,
-    fontFamily: 'Satoshi-Bold',
+    fontWeight: 'bold',
     color: '#FFFFFF', // White
     marginTop: 16,
     marginBottom: 8,
   },
   emptyStateText: {
     fontSize: 14,
-    fontFamily: 'Satoshi-Regular',
     color: '#B0C4DE', // Light slate
     textAlign: 'center',
     lineHeight: 20,
@@ -618,6 +690,16 @@ const styles = StyleSheet.create({
   refreshButtonText: {
     color: '#FFFFFF', // White
     fontSize: 16,
-    fontFamily: 'Satoshi-Medium',
+    fontWeight: '500',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: '#B0C4DE',
   },
 });
