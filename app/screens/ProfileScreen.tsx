@@ -8,10 +8,13 @@ import {
   ScrollView,
   SafeAreaView,
   ActivityIndicator,
-  Alert
+  Alert,
+  Animated,
+  Clipboard
 } from 'react-native';
 import { useAuth } from '../AuthContext';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 
 interface Profile {
   firstName?: string;
@@ -30,6 +33,8 @@ export default function ProfileScreen() {
   };
   
   const [isLoading, setIsLoading] = useState(false);
+  const [copyAnimation] = useState(new Animated.Value(0));
+  const [copiedAddress, setCopiedAddress] = useState(false);
   
   // Handle sign out with confirmation
   const handleSignOut = () => {
@@ -71,10 +76,37 @@ export default function ProfileScreen() {
     console.log("Failed to load avatar image");
   };
 
+  // Copy wallet address
+  const copyWalletAddress = () => {
+    if (profile.address) {
+      Clipboard.setString(profile.address);
+      setCopiedAddress(true);
+      
+      // Trigger animation
+      Animated.sequence([
+        Animated.timing(copyAnimation, {
+          toValue: 1,
+          duration: 200,
+          useNativeDriver: true
+        }),
+        Animated.delay(1500),
+        Animated.timing(copyAnimation, {
+          toValue: 0,
+          duration: 200,
+          useNativeDriver: true
+        })
+      ]).start(() => setCopiedAddress(false));
+    }
+  };
+
   if (!profile) {
     return (
       <SafeAreaView style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#001b2a" />
+        <LinearGradient
+          colors={['#2E1A47', '#3A1A5F']}
+          style={StyleSheet.absoluteFill}
+        />
+        <ActivityIndicator size="large" color="#8A2BE2" />
         <Text style={styles.loadingText}>Loading profile...</Text>
       </SafeAreaView>
     );
@@ -82,41 +114,73 @@ export default function ProfileScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
+      <LinearGradient
+        colors={['#2E1A47', '#3A1A5F']}
+        style={StyleSheet.absoluteFill}
+      />
       <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
-        <View style={styles.header}>
-          <View style={styles.headerTopRow}>
-            <TouchableOpacity 
-              style={styles.editButton} 
-              onPress={handleEditProfile}
-            >
-              <Ionicons name="pencil" size={18} color="#fff" />
-              <Text style={styles.editButtonText}>Edit</Text>
-            </TouchableOpacity>
+        <LinearGradient 
+          colors={['#3A1A5F', '#2E1A47']} 
+          style={styles.headerGradient}
+        >
+          <View style={styles.header}>
+            <View style={styles.headerTopRow}>
+              <TouchableOpacity 
+                style={styles.editButton} 
+                onPress={handleEditProfile}
+              >
+                <Ionicons name="pencil-outline" size={18} color="#FFFFFF" />
+                <Text style={styles.editButtonText}>Edit</Text>
+              </TouchableOpacity>
+            </View>
+            
+            <View style={styles.avatarContainer}>
+              <Image
+                source={{ 
+                  uri: profile.avatarUrl || 'https://via.placeholder.com/100' 
+                }}
+                style={styles.avatar}
+                onError={handleAvatarError}
+              />
+              <LinearGradient
+                colors={['#8A2BE2', '#5A55DE']}
+                style={styles.avatarRing}
+              />
+            </View>
+            
+            <Text style={styles.name}>
+              {profile.firstName || ''} {profile.lastName || ''}
+            </Text>
+            
+            <Text style={styles.email}>{profile.email || 'No email provided'}</Text>
           </View>
-          
-          <Image
-            source={{ 
-              uri: profile.avatarUrl || 'https://via.placeholder.com/100' 
-            }}
-            style={styles.avatar}
-            onError={handleAvatarError}
-          />
-          
-          <Text style={styles.name}>
-            {profile.firstName || ''} {profile.lastName || ''}
-          </Text>
-          
-          <Text style={styles.email}>{profile.email || 'No email provided'}</Text>
-        </View>
+        </LinearGradient>
 
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Wallet Address</Text>
-            <TouchableOpacity>
-              <Ionicons name="copy-outline" size={20} color="#001b2a" />
+            <TouchableOpacity onPress={copyWalletAddress} style={styles.copyButton}>
+              <Ionicons 
+                name={copiedAddress ? "checkmark-outline" : "copy-outline"} 
+                size={20} 
+                color={copiedAddress ? "#87CEEB" : "#FFFFFF"} 
+              />
+              <Animated.View 
+                style={{
+                  opacity: copyAnimation,
+                  transform: [{ 
+                    translateY: copyAnimation.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0, -20]
+                    })
+                  }]
+                }}
+              >
+                <Text style={styles.copiedText}>Copied!</Text>
+              </Animated.View>
             </TouchableOpacity>
           </View>
-          <Text style={styles.sectionContent}>
+          <Text style={styles.walletAddress}>
             {formatWalletAddress(profile.address)}
           </Text>
         </View>
@@ -126,7 +190,7 @@ export default function ProfileScreen() {
             <Text style={styles.sectionTitle}>Interests</Text>
             {profile.interests?.length > 0 && (
               <TouchableOpacity>
-                <Ionicons name="add-circle-outline" size={20} color="#001b2a" />
+                <Ionicons name="add-circle-outline" size={20} color="#FFFFFF" />
               </TouchableOpacity>
             )}
           </View>
@@ -134,9 +198,15 @@ export default function ProfileScreen() {
           {profile.interests?.length > 0 ? (
             <View style={styles.interestsContainer}>
               {profile.interests.map((interest: string, index: number) => (
-                <View key={index} style={styles.interestTag}>
+                <LinearGradient
+                  key={index}
+                  colors={['#8A2BE2', '#6A1FD0']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={styles.interestTag}
+                >
                   <Text style={styles.interestText}>{interest}</Text>
-                </View>
+                </LinearGradient>
               ))}
             </View>
           ) : (
@@ -149,11 +219,17 @@ export default function ProfileScreen() {
           onPress={handleSignOut}
           disabled={isLoading}
         >
+          <LinearGradient
+            colors={['#8A2BE2', '#6515A3']}
+            style={[StyleSheet.absoluteFill, { borderRadius: 12 }]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+          />
           {isLoading ? (
-            <ActivityIndicator size="small" color="#fff" />
+            <ActivityIndicator size="small" color="#FFFFFF" />
           ) : (
             <>
-              <Ionicons name="log-out-outline" size={24} color="#fff" />
+              <Ionicons name="log-out-outline" size={24} color="#FFFFFF" />
               <Text style={styles.logoutText}>Log Out</Text>
             </>
           )}
@@ -166,11 +242,10 @@ export default function ProfileScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#8caba9',
+    backgroundColor: '#2E1A47',
   },
   container: {
     flex: 1,
-    backgroundColor: '#8caba9',
   },
   contentContainer: {
     paddingBottom: 30,
@@ -179,16 +254,21 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#8caba9',
   },
   loadingText: {
     marginTop: 10,
     fontSize: 16,
-    color: '#001b2a',
+    color: '#B0C4DE',
+  },
+  headerGradient: {
+    borderBottomLeftRadius: 30,
+    borderBottomRightRadius: 30,
+    overflow: 'hidden',
   },
   header: {
     alignItems: 'center',
     padding: 20,
+    paddingBottom: 30,
   },
   headerTopRow: {
     width: '100%',
@@ -199,81 +279,115 @@ const styles = StyleSheet.create({
   editButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#001b2a',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
+    backgroundColor: 'rgba(138, 43, 226, 0.4)',
+    paddingVertical: 8,
+    paddingHorizontal: 14,
     borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#8A2BE2',
   },
   editButtonText: {
-    color: '#fff',
+    color: '#FFFFFF',
     marginLeft: 5,
-    fontWeight: '500',
+    fontWeight: '600',
+  },
+  avatarContainer: {
+    marginVertical: 16,
+    position: 'relative',
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: 130,
+    height: 130,
+  },
+  avatarRing: {
+    position: 'absolute',
+    width: 130,
+    height: 130,
+    borderRadius: 65,
+    opacity: 0.8,
   },
   avatar: {
     width: 120,
     height: 120,
     borderRadius: 60,
     borderWidth: 3,
-    borderColor: '#fff',
-    marginVertical: 16,
-    backgroundColor: '#ccc',
+    borderColor: 'rgba(255, 255, 255, 0.5)',
+    backgroundColor: '#2E1A47',
+    zIndex: 1,
   },
   name: {
     fontSize: 26,
     fontWeight: 'bold',
     marginBottom: 5,
-    color: '#001b2a',
+    color: '#FFFFFF',
+    textShadowColor: 'rgba(138, 43, 226, 0.5)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 5,
   },
   email: {
     fontSize: 16,
-    color: '#333',
+    color: '#B0C4DE',
   },
   section: {
-    backgroundColor: '#fff',
+    backgroundColor: 'rgba(46, 26, 71, 0.7)',
     padding: 20,
     marginTop: 20,
     marginHorizontal: '5%',
-    borderRadius: 12,
+    borderRadius: 16,
     width: '90%',
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(138, 43, 226, 0.3)',
+    shadowColor: '#8A2BE2',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 8,
   },
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 10,
+    marginBottom: 15,
   },
   sectionTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#001b2a',
+    color: '#87CEEB',
   },
-  sectionContent: {
+  walletAddress: {
     fontSize: 16,
-    color: '#555',
+    color: '#FFFFFF',
+    fontFamily: 'monospace',
+  },
+  copyButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    position: 'relative',
+  },
+  copiedText: {
+    color: '#87CEEB',
+    fontSize: 12,
+    position: 'absolute',
+    right: 0,
+    top: -20,
   },
   interestsContainer: {
     flexDirection: 'row',
     flexWrap: 'wrap',
   },
   interestTag: {
-    backgroundColor: '#001b2a',
     borderRadius: 20,
     paddingVertical: 8,
     paddingHorizontal: 16,
     margin: 5,
   },
   interestText: {
-    color: '#fff',
+    color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '500',
   },
   emptyStateText: {
-    color: '#888',
+    color: '#B0C4DE',
     fontStyle: 'italic',
     textAlign: 'center',
     marginVertical: 10,
@@ -282,18 +396,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#780000',
     padding: 16,
     margin: 20,
     borderRadius: 12,
-    elevation: 3,
-    shadowColor: '#000',
+    shadowColor: '#8A2BE2',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
+    shadowOpacity: 0.5,
+    shadowRadius: 6,
+    elevation: 5,
+    overflow: 'hidden'
   },
   logoutText: {
-    color: '#fff',
+    color: '#FFFFFF',
     fontSize: 18,
     fontWeight: 'bold',
     marginLeft: 10,
