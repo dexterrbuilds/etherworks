@@ -1,4 +1,5 @@
 export interface Gig {
+    client: string;
     id: string;
     title: string;
     description: string;

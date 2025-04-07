@@ -45,7 +45,7 @@ const MainStackNavigator = () => {
         options={({ navigation }) => ({
           headerLeft: () => <HeaderLeft />,
           headerRight: () => <HeaderRight navigation={navigation} />,
-          headerTitle: 'Sei earn',
+          headerTitle: 'Etherworks',
         })}
       />
       <MainStack.Screen name="GigDetails" component={GigDetailsScreen} />
@@ -68,7 +68,7 @@ const MainTabs = () => {
           } else if (route.name === 'Admin') {
             iconName = focused ? 'settings' : 'settings-outline';
           }
-          return <Ionicons name={iconName} size={size} color={color} />;
+          return <Ionicons name={(iconName as keyof typeof Ionicons.glyphMap) || 'help-circle-outline'} size={size} color={color} />;
         },
       })}
     >
